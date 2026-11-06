@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "product-launch-motion": {
+      "source": "AbubakrChan/product-launch-motion",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "ca2cb120f7479ac9254f640aa19c6949a99b1bf96774f32706afceda3d8acc03"
+    }
+  }
+}

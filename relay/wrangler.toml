@@ -1,0 +1,19 @@
+name = "retropolo-relay"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+# answer a phone's close frame for us (the 2026 compatibility dates broke joining rooms in
+# local tests, so only this one newer behaviour is switched on)
+compatibility_flags = ["web_socket_auto_reply_to_close"]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+# SQLite-backed Durable Objects are available on the free Workers plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Matchmaker"]

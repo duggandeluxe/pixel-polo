@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Retro Polo hype film</title>
+<style>
+@font-face { font-family: 'Jersey'; src: url('fonts/Jersey10-Regular.ttf'); }
+@font-face { font-family: 'Silk'; src: url('fonts/Silkscreen-Regular.ttf'); }
+@font-face { font-family: 'Tiny'; src: url('fonts/Tiny5-Regular.ttf'); }
+:root {
+  --blue: #2a68f5; --blue-hi: #3b7bff; --panel: #1d4ab8; --gold: #ffd23f; --ink: #06103a;
+  --navy: #0b1224; --red: #ff4a4a; --lime: #7fe35f; --white: #f4f7ff;
+}
+html, body { margin: 0; background: #06103a; overflow: hidden; }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--blue); color: var(--white);
+  font-family: 'Silk', monospace; -webkit-font-smoothing: none; }
+#shake, #world, #hud, canvas, #flash, #crt { position: absolute; left: 0; top: 0; }
+#shake { width: 1920px; height: 1080px; }
+#world { width: 0; height: 0; transform-origin: 0 0; }
+#hud { width: 1920px; height: 1080px; }
+canvas { width: 1920px; height: 1080px; image-rendering: pixelated; }
+#flash { width: 1920px; height: 1080px; background: #fff; opacity: 0; pointer-events: none; }
+#crt { width: 1920px; height: 1080px; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.10) 0 2px, rgba(0,0,0,0) 2px 5px),
+              radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 58%, rgba(2,6,30,0.55) 100%); }
+.a { position: absolute; left: 0; top: 0; white-space: nowrap; }
+.slam { font-family: 'Jersey'; line-height: 0.86; color: var(--gold); letter-spacing: 0.01em;
+  text-shadow: 0 0 0 var(--ink), 5px 0 0 var(--ink), -5px 0 0 var(--ink), 0 5px 0 var(--ink), 0 -5px 0 var(--ink),
+               5px 5px 0 var(--ink), -5px 5px 0 var(--ink), 5px -5px 0 var(--ink), -5px -5px 0 var(--ink),
+               14px 14px 0 var(--ink); }
+.white { color: var(--white); }
+.red { color: var(--red); }
+.lime { color: var(--lime); }
+.cap { font-family: 'Silk'; color: var(--white); text-shadow: 4px 4px 0 var(--ink); }
+.tiny { font-family: 'Tiny'; color: var(--white); text-shadow: 3px 3px 0 var(--ink); }
+.phone { width: 1260px; height: 735px; border-radius: 70px; background: #0b1224; transform-origin: 50% 50%;
+  box-shadow: 0 0 0 6px #22305a, 22px 26px 0 rgba(6,16,58,0.55); }
+.scr { position: absolute; left: 30px; top: 30px; width: 1200px; height: 675px; overflow: hidden; border-radius: 26px; background: #000; }
+.scr img { position: absolute; left: 0; top: 0; width: 1200px; height: 675px; image-rendering: pixelated; }
+.pix { image-rendering: pixelated; }
+.card { width: 400px; height: 270px; background: var(--panel); box-shadow: 0 0 0 6px var(--gold), 0 0 0 12px var(--ink), 14px 16px 0 12px rgba(6,16,58,0.6); }
+.card .nm { position: absolute; left: 26px; top: 22px; font-family: 'Jersey'; font-size: 82px; line-height: 0.9; color: var(--gold); text-shadow: 5px 5px 0 var(--ink); }
+.card .ds { position: absolute; left: 28px; top: 120px; width: 350px; white-space: normal; font-family: 'Tiny'; font-size: 40px; line-height: 1.05; color: var(--white); text-shadow: 3px 3px 0 var(--ink); }
+.card .no { position: absolute; right: 22px; bottom: 16px; font-family: 'Silk'; font-size: 28px; color: #a9bdf0; }
+.toast { width: 820px; height: 138px; background: var(--navy); box-shadow: 0 0 0 5px var(--gold), 0 0 0 10px var(--ink), 14px 14px 0 10px rgba(6,16,58,0.55); }
+.toast .ic { position: absolute; left: 22px; top: 21px; width: 96px; height: 96px; background: var(--gold); box-shadow: inset -8px -8px 0 #e0a92a, inset 8px 8px 0 #fff2a8; }
+.toast .l1 { position: absolute; left: 146px; top: 18px; font-family: 'Silk'; font-size: 28px; color: var(--gold); }
+.toast .l2 { position: absolute; left: 146px; top: 52px; font-family: 'Jersey'; font-size: 78px; line-height: 0.9; color: var(--white); text-shadow: 4px 4px 0 #000; }
+.plate { background: var(--navy); box-shadow: 0 0 0 6px var(--gold), 0 0 0 12px var(--ink); }
+.chip { padding: 10px 28px 6px; background: var(--navy); box-shadow: 0 0 0 5px var(--white), 0 0 0 10px var(--ink); font-family: 'Jersey'; font-size: 96px; line-height: 1; color: var(--white); }
+.team { font-family: 'Silk'; font-size: 40px; color: var(--white); text-shadow: 4px 4px 0 var(--ink); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="shake">
+    <canvas id="bg" width="480" height="270"></canvas>
+    <div id="world"></div>
+    <canvas id="fx" width="1920" height="1080"></canvas>
+    <div id="hud"></div>
+  </div>
+  <div id="flash"></div>
+  <div id="crt"></div>
+</div>
+<script src="engine/core.js?v=3"></script>
+<script src="film.js?v=3"></script>
+</body>
+</html>

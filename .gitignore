@@ -1,0 +1,42 @@
+# Godot
+game/.godot/
+game/**/*.import.tmp
+build/
+*.apk
+*.aab
+*.ipa
+# macOS
+.DS_Store
+# signing
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+# built plugins and relay tooling
+game/addons/retropolo_ble/bin/
+plugins/android-ble/build/
+game/ios/plugins/
+node_modules/
+relay/.wrangler/
+# web builds and packaged releases (rebuilt from game/ by tools/export_*.sh)
+/export/
+/builds/
+/RetroPoloWeb/
+/*.zip
+# rendered marketing video (too big for GitHub; rebuilt from marketing/hype-film)
+marketing/**/*.mp4
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+# Windows
+Thumbs.db
+desktop.ini
+# python
+__pycache__/
+*.pyc
+# local secrets, should any ever appear
+.env
+.env.*
+*.pem
+*.p8
+export_credentials.cfg

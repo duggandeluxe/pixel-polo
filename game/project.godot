@@ -1,0 +1,66 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Retro Polo"
+config/description="Pixel Polo: Water Polo Dynasty. Retro-style college water polo: run the program, play every attack."
+config/version="0.1.0"
+run/main_scene="res://src/main.tscn"
+config/quit_on_go_back=false
+config/features=PackedStringArray("4.7", "GL Compatibility")
+boot_splash/bg_color=Color(0.058, 0.094, 0.188, 1)
+boot_splash/show_image=false
+config/icon="res://icon.png"
+
+[audio]
+
+general/ios/session_category=3
+general/ios/mix_with_others=true
+
+[autoload]
+
+UI="*res://src/autoload/ui.gd"
+Sfx="*res://src/autoload/sfx.gd"
+Game="*res://src/autoload/game.gd"
+Store="*res://src/autoload/store.gd"
+Net="*res://src/autoload/net.gd"
+
+[display]
+
+window/size/viewport_width=480
+window/size/viewport_height=270
+window/size/window_width_override=1440
+window/size/window_height_override=810
+window/stretch/mode="viewport"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/retropolo_ble/plugin.cfg")
+
+[gui]
+
+common/drop_mouse_on_gui_input_disabled=true
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.058, 0.094, 0.188, 1)
+2d/snap/snap_2d_transforms_to_pixel=true
+2d/snap/snap_2d_vertices_to_pixel=true

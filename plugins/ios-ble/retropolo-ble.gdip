@@ -1,0 +1,18 @@
+[config]
+name="retropolo-ble"
+binary="retropolo-ble.xcframework"
+
+initialization="register_retropolo_ble_types"
+deinitialization="unregister_retropolo_ble_types"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["CoreBluetooth.framework"]
+
+capabilities=[]
+
+files=[]
+
+[plist]
+NSBluetoothAlwaysUsageDescription:string="Retro Polo uses Bluetooth to play a friend nearby, even with no Wi-Fi."
