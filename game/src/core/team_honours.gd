@@ -11,8 +11,6 @@ class_name TeamHonours
 ## {kind "title", key, cat (conf_champ | ncsa_champ), title, short, season, year (earned), week "",
 ## conf, team, line "", order}.
 
-const DIVISION_TITLES := {"d2": "DIVISION II CHAMPIONS", "d3": "NCSA DIVISION III NATIONAL CHAMPIONS"}
-
 ## The season's champions into the log, once (a season already there is left as it is).
 static func record_season(c: Career) -> void:
 	var label := c.season_label()
@@ -24,9 +22,6 @@ static func record_season(c: Career) -> void:
 			confs[String((c.teams[id] as PoloTeam).conf)] = String(id)
 	var e := {"season": label, "conf": confs, "nat": String(c.season.get("champion", ""))}
 	e["finals"] = Schedule.finals(c.schedule, c.teams)
-	for f in e.finals:
-		if String(f.key) in ["d2", "d3"]:
-			e[String(f.key)] = String(f.champion)
 	c.champions_log.append(e)
 
 ## A season's champions as lines for the Record Book: "NCSA: Team" for the seasons before the
@@ -50,9 +45,6 @@ static func of(c: Career, team_id: String) -> Array:
 				out.append(_entry("conf", String(cf), season, team_id, c.legacy.has(e)))
 		if String(e.get("nat", "")) == team_id:
 			out.append(_entry("nat", "", season, team_id, c.legacy.has(e)))
-		for k in ["d2", "d3"]:
-			if String(e.get(k, "")) == team_id:
-				out.append(_entry(k, "", season, team_id, c.legacy.has(e)))
 	# an older save's own titles, for seasons from before the log
 	for t in c.coach.get("titles", []):
 		var text := String(t)
@@ -82,10 +74,7 @@ static func of(c: Career, team_id: String) -> Array:
 static func _entry(kind: String, conf: String, season: String, team: String, hist: bool) -> Dictionary:
 	var abbr := Colleges.conf_abbr(conf) if conf != "" else "NCSA"
 	var title := "%s CHAMPIONS" % abbr
-	if kind in DIVISION_TITLES:
-		title = String(DIVISION_TITLES[kind])
-		abbr = "DIV. II" if kind == "d2" else "DIV. III"
-	return {"kind": "title", "key": ("c|" + conf) if kind == "conf" else (kind if kind in DIVISION_TITLES else "n"),
-		"cat": "conf_champ" if kind == "conf" else (kind + "_champ" if kind in DIVISION_TITLES else "ncsa_champ"),
+	return {"kind": "title", "key": ("c|" + conf) if kind == "conf" else "n",
+		"cat": "conf_champ" if kind == "conf" else "ncsa_champ",
 		"title": title, "short": title, "season": season, "year": NationalAwards.earned_year(season), "week": "",
 		"conf": abbr, "team": team, "line": "BEFORE YOUR DYNASTY" if hist else "", "order": [season, 0 if kind == "conf" else (2 if kind == "nat" else 1), 0]}

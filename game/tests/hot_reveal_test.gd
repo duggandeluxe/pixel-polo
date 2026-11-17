@@ -202,7 +202,8 @@ func _summary_heats() -> void:
 		scr.reveal._process(0.05)
 		scr._process(0.05)
 		guard += 1
-	r.check(scr.stage == 2 and not scr.reveal.running, "when it's done it goes on to the round by itself (%.1f s)" % (guard * 0.05))
+	await _frames()
+	r.check(guard < 400 and Game.current_name == "player_development", "when it's done it goes on to PLAYER DEVELOPMENT by itself (%.1f s)" % (guard * 0.05))
 	var same := true
 	var same_looks := true
 	for p: PoloPlayer in c.team().roster:
@@ -210,24 +211,15 @@ func _summary_heats() -> void:
 		same_looks = same_looks and looks[p.id] == JSON.stringify([p.attrs, p.attr_pot, p.stars, p.pot_stars])
 	r.check(same, "playing it graded nobody again: every form and heat as the game left them")
 	r.check(same_looks, "...and no attribute or star changed")
-	r.check(c.week == week and Game.current_name == "game_summary", "the career hasn't moved on yet")
+	r.check(c.week == week, "the career hasn't moved on yet")
 	var back := Career.from_dict(JSON.parse_string(JSON.stringify(c.to_dict())))
 	var bp: PoloPlayer = back.team().find_id(scorer.id)
 	r.check(bp != null and bp.heat == scorer.heat and bp.form == scorer.form, "saved and loaded: his HOT star is still there")
-	scr.t = 2.0
-	scr.tap(Vector2(10, 10))
-	r.check(scr.stage == 3, "then UP NEXT")
-	scr.t = 2.0
-	await _frames()
-	scr.tap(scr.cont_rect.get_center())
-	scr.tap(scr.cont_rect.get_center())
-	await _frames()
-	r.check(Game.current_name == "postgame_review", "CONTINUE: the POSTGAME REVIEW, once")
 	Game.career = null
 	Game.goto("title")
 	await tree.process_frame
 
-## Nobody heats up: FINAL goes straight on to the round.
+## Nobody heats up: FINAL goes straight on to PLAYER DEVELOPMENT.
 func _summary_quiet() -> void:
 	var tree: SceneTree = r.get_tree()
 	Game.career = Career.new_game("WAGN", "A", "B", 58)
@@ -245,7 +237,10 @@ func _summary_quiet() -> void:
 	r.check(scr.heaters.is_empty() and scr.form.size() == 7, "nobody heated up (the seven were still graded)")
 	scr.t = 1.0
 	scr.tap(Vector2(10, 10))
-	r.check(scr.stage == 2 and not scr.reveal.running, "FINAL, tap: straight on to the round, no reveal")
+	r.check(scr.done and not scr.reveal.running, "FINAL, tap: no reveal")
+	await tree.process_frame
+	await tree.process_frame
+	r.check(Game.current_name == "player_development", "...straight on to PLAYER DEVELOPMENT")
 	Game.career = null
 	Game.goto("title")
 	await tree.process_frame
@@ -298,7 +293,8 @@ func _settings() -> void:
 	await tree.process_frame
 	r.check(not _has_button(Game.current_screen, "HOT STAR REVEAL"), "Developer Mode off: no reveal preview")
 	Game.settings.dev_mode = true
-	Game.goto("settings", {}, false)
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings", {}, false)
 	await tree.process_frame
 	r.check(_has_button(Game.current_screen, "HOT STAR REVEAL"), "Developer Mode on: HOT STAR REVEAL")
 	Game.settings.dev_mode = dev_was

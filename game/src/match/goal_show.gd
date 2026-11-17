@@ -59,9 +59,8 @@ var mouth := Vector2.ZERO        # where it crossed the goal line (pool metres)
 var hero: Swimmer = null         # the scorer in the water
 var mates: Array[Swimmer] = []   # his teammates near enough to join in
 var keeper: Swimmer = null       # the keeper it went past
-var top := -1.0                  # px: where the text block sits (place), once it's drawn
+var top := -1.0                  # px: where the text block sits (place: always TEXT_TOP), once it's drawn
 var hop_boost := 1.0             # how big the scorer's bounces are (a celebration's: Celebrations)
-var word_add := 0                # GOAL! this much bigger (the Goal Celebrations level: GoalFx)
 var pre := 0.0                   # s held back before it starts (a BAR-IN! / BAR-DOWN! first: BarHit.PRE)
 
 ## What a goal for `side` means, from the score before it's counted: {kind, late}.
@@ -278,12 +277,12 @@ static func _splash(ci: CanvasItem, p: Vector2, u: float) -> void:
 		ci.draw_rect(Rect2(roundf(q.x), roundf(q.y), 1, 2 if d.x == 0.0 else 1), Color(1, 1, 1, 0.85 * a))
 
 ## Over the HUD: the strip, the flash, the word, the scorer and his goals today, the extras.
-## `v`: the camera, to keep the block off the scorer (place).
-func draw(ci: CanvasItem, size: Vector2, v: PoolView = null) -> void:
+## Screen space, always at the same place (place): nothing about the camera, the ball, the goal
+## or the scorer moves it.
+func draw(ci: CanvasItem, size: Vector2) -> void:
 	if not active() or t < IMPACT_AT:
 		return
-	if top < 0.0:
-		top = place(size, v)   # (once: the block doesn't jump about)
+	top = place()
 	var a := 1.0 - clampf((t - out_at()) / OUT, 0.0, 1.0)
 	var u := t - IMPACT_AT
 	var c := t - CELEBRATE_AT
@@ -349,19 +348,15 @@ func block_h() -> float:
 	var n := _lines().size()
 	return cap + 16.0 + (10.0 + 12.0 * n if n > 0 else 0.0) + (16.0 if kind == "lead" else 0.0)
 
-## Where the block goes, px from the top: under the scoreboard, unless the scorer's up there,
-## then down at the bottom of the screen, clear of him (and of TAP TO SKIP).
-func place(size: Vector2, v: PoolView) -> float:
-	if v == null or hero == null:
-		return TEXT_TOP
-	var hy := v.to_screen(hero.pos).y
-	var body := Vector2(hy - 22.0, hy + 6.0)   # his head and raised fist to the splash under him
-	if body.y < TEXT_TOP or body.x > TEXT_TOP + block_h():
-		return TEXT_TOP
-	return roundf(size.y - block_h() - 14.0)
+## Where the block goes, px from the top of the screen: always TEXT_TOP, just under the
+## scoreboard, centred across. Every goal (in play, a counter, a centre's, a penalty, a 6 on 5,
+## a shootout) uses this and only this: it used to drop to the bottom of the screen when the
+## scorer was up near the top, which is why GOAL! sometimes showed up at a different height.
+func place() -> float:
+	return TEXT_TOP
 
 func word_base() -> int:
-	return (WORD_BIG if big() else WORD) + word_add
+	return WORD_BIG if big() else WORD
 
 ## The widest thing on the strip, px.
 func content_w(w: float) -> float:

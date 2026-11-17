@@ -11,7 +11,34 @@ func run(runner) -> void:
 	print("conference awards")
 	Store.reset_for_tests()
 	_scores()
+	await _fresh()
 	await _season()
+	Game.career = null
+
+## A brand-new career: only Legacy's made-up past in its records, so its AWARDS screen is empty,
+## and none of it leaks in from the career opened before it.
+func _fresh() -> void:
+	var old := Career.new_game("LIUB", "A", "B", 316)
+	old.queue.clear()
+	Game.career = old
+	Game.goto("awards")
+	await _frames(2)
+	var c := Career.new_game("LIUB", "A", "B", 317)
+	c.queue.clear()
+	Game.career = c
+	r.check(not c.conf_awards.is_empty() and ConfAwards.earned(c).is_empty() and ConfAwards.weeks(c, true).is_empty(),
+		"new career: Legacy's past awards are kept apart; none earned yet")
+	Game.goto("awards")
+	await _frames(2)
+	var scr = Game.current_screen
+	r.check(scr.find_child("NoAwards", true, false) != null and scr.find_child("Cards", true, false) == null,
+		"new career: the AWARDS screen says AWARDS COMING SOON, no cards from before")
+	(scr.find_child("HistoryToggle", true, false) as BaseButton).pressed.emit()
+	await _frames(2)
+	var says := Game.current_screen.find_children("*", "Label", true, false).any(func(l): return not l.is_queued_for_deletion() and (l as Label).text == "AWARDS COMING SOON")
+	r.check(Game.current_screen.find_child("HistoryList", true, false) == null and says,
+		"new career: AWARD HISTORY has nothing from before the dynasty")
+	Game.current_screen.history = false
 	Game.career = null
 
 func _frames(n: int) -> void:
@@ -60,6 +87,7 @@ func _season() -> void:
 	var cpu_win := false
 	var losing_win := false
 	var multi := false
+	var sweep := false
 	var guard := 0
 	while c.week < Schedule.REGULAR_WEEKS + 2 and guard < 40:
 		guard += 1
@@ -73,12 +101,12 @@ func _season() -> void:
 		var expect := {}
 		for conf in ConfAwards.CONF_ORDER:
 			var lines := ConfAwards._lines(c, conf)
-			var taken := {}
-			for cat in ConfAwards.PICK_ORDER:
-				var b := ConfAwards._best(lines.filter(func(e): return not taken.has((e.p as PoloPlayer).id)), cat)
-				if not b.is_empty():
-					taken[(b.p as PoloPlayer).id] = true
-					expect["%s:%s" % [conf, cat]] = (b.p as PoloPlayer).id
+			var picked := ConfAwards.pick_week(lines) if not lines.is_empty() else {}
+			if picked.has("potw"):
+				var top := ConfAwards._best(lines, "potw")
+				matched = matched and (top.p as PoloPlayer).id == (picked.potw.p as PoloPlayer).id   # (POTW: the best week, whoever's school)
+			for cat in picked:
+				expect["%s:%s" % [conf, cat]] = (picked[cat].p as PoloPlayer).id
 			# the goals each team scored this week are its players' goals
 			for id in c.teams:
 				var t: PoloTeam = c.teams[id]
@@ -121,6 +149,11 @@ func _season() -> void:
 		for a in made:
 			by_pid[a.pid] = int(by_pid.get(a.pid, 0)) + 1
 		multi = multi or by_pid.values().any(func(n): return n > 1)   # (never: one award a player a week)
+		var by_school := {}
+		for a in made:
+			var k := "%s|%s" % [a.conf, a.team]
+			by_school[k] = int(by_school.get(k, 0)) + 1
+		sweep = sweep or by_school.values().any(func(n): return n > ConfAwards.MAX_PER_TEAM)
 		if not made.is_empty():
 			weeks += 1
 		c.end_week()
@@ -130,6 +163,7 @@ func _season() -> void:
 	r.check(confs.size() == 5, "1: all five conferences name winners (%s)" % [confs.keys()])
 	r.check(ConfAwards.CATS.all(func(cat): return c.conf_awards.any(func(a): return a.cat == cat)), "2: all four awards given")
 	r.check(matched, "3: the winners are the week's best by its real stats")
+	r.check(not sweep, "no sweeps: a school never wins more than %d of a conference-week's awards" % ConfAwards.MAX_PER_TEAM)
 	r.check(reconcile, "8, 11: a team's goals in a week are its players' recorded goals")
 	r.check(cpu_win, "4: AI programs' players win")
 	r.check(rookies_ok, "6: ROOKIE OF THE WEEK only ever a freshman")
@@ -141,7 +175,7 @@ func _season() -> void:
 	r.check(c.conf_awards.filter(func(a): return not bool(a.get("hist", false))).size() <= weeks * 20, "at most 20 a week (this dynasty's: Legacy's past seasons apart)")
 	# a conference that didn't play names nobody
 	var quiet := c.conf_awards.filter(func(a): return int(a.week) >= Schedule.REGULAR_WEEKS)
-	r.check(quiet.all(func(a): return ConfAwards._lines(c, String(a.conf)) != null), "12: postseason weeks only name players who played")
+	r.check(quiet.all(func(a): return not Schedule.is_playoff(c.schedule[int(a.week)])), "12: postseason rounds name no weekly awards (the Postseason Awards update)")
 	# your player: a big week of his own wins
 	var c2 := Career.new_game("LIUB", "A", "B", 315)
 	var g2 := 0
@@ -208,6 +242,26 @@ func _season() -> void:
 	var hist: Node = Game.current_screen.find_child("HistoryList", true, false)
 	r.check(hist != null and hist.get_child_count() > 0, "19: AWARD HISTORY lists them")
 	Game.current_screen.history = false
+	# the tournaments' honours: after the season's weeks, CONF TOURNAMENT then NCSA TOURNAMENT
+	var n_before: int = ConfAwards.weeks(back, true).size()
+	fake_tourney(back)
+	var pg: Array = Game.current_screen.pages(back)
+	r.check(pg.size() == n_before + 2 and String(pg[-2][4]) == "conf" and String(pg[-1][4]) == "nat",
+		"tourney 1: the conference and NCSA tournament pages follow the weeks (%s)" % [pg.slice(-3).map(func(x): return x[2])])
+	Game.goto("awards")
+	await _frames(2)
+	var tc: Node = Game.current_screen.find_child("TourneyCards", true, false)
+	r.check(tc != null and Game.current_screen.find_child("Cards", true, false) == null and (Game.current_screen.find_child("WeekLabel", true, false) as Label).text.ends_with("NCSA TOURNAMENT"),
+		"tourney 2: the latest page is the NCSA TOURNAMENT's")
+	r.check(tc != null and tc.find_children("Card_*", "", true, false).filter(func(n): return n is BaseButton).size() == 3, "tourney 3: its three winners as cards")
+	(Game.current_screen.find_child("PrevWeek", true, false) as BaseButton).pressed.emit()
+	await _frames(2)
+	r.check((Game.current_screen.find_child("WeekLabel", true, false) as Label).text.ends_with(Colleges.conf_abbr(Game.current_screen.conf) + " TOURNAMENT") \
+		and Game.current_screen.find_child("TourneyCards", true, false) != null, "tourney 4: < goes back to the CONF TOURNAMENT page")
+	(Game.current_screen.find_child("PrevWeek", true, false) as BaseButton).pressed.emit()
+	await _frames(2)
+	r.check(Game.current_screen.find_child("Cards", true, false) != null, "tourney 5: and back again to the last regular week")
+	back.tourney_awards.clear()
 	for q in Game.career.upgrades_due():   # (an unspent upgrade would open before the home screen)
 		Development.ai_spend(q)
 	Game.goto("hub")
@@ -216,10 +270,45 @@ func _season() -> void:
 	Game.goto("title")
 	await _frames(1)
 
+## Each conference's and the NCSA tournament's three, named from real rosters (test data: the
+## screen only reads the records).
+static func fake_tourney(c: Career) -> void:
+	var tids: Array = ConfAwards.CONF_ORDER.map(func(cf): return "conf:" + cf) + ["nat"]
+	var i := 0
+	for tid in tids:
+		var pool: Array = []
+		for id in c.teams:
+			var t: PoloTeam = c.teams[id]
+			if tid == "nat" or "conf:" + t.conf == tid:
+				for p in t.roster:
+					pool.append([p, id])
+		if pool.is_empty():
+			continue
+		for cat in TourneyAwards.CATS:
+			var e: Array = pool[(i * 7) % pool.size()]
+			if cat == "dpot":
+				for x in pool:
+					if (x[0] as PoloPlayer).is_keeper():
+						e = x
+						break
+			i += 1
+			var line := {"gp": 3, "sv": 31, "ga": 14} if (e[0] as PoloPlayer).is_keeper() else {"gp": 3, "g": 9, "a": 4, "st": 3}
+			c.tourney_awards.append(TourneyAwards._record(c, {"p": e[0], "team": e[1], "line": line, "score": 30.0}, cat, tid))
+
 static func shots(runner, out: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	Store.reset_for_tests()
-	Store.mark_starter_offered()
+	if Store.has_method("mark_starter_offered"):
+		Store.call("mark_starter_offered")
+	var tree: SceneTree = runner.get_tree()
+	# a new career's: nothing given yet
+	var fresh := Career.new_game("LIUB", "A", "B", 317)
+	fresh.queue.clear()
+	Game.career = fresh
+	Game.goto("awards")
+	await tree.create_timer(0.6).timeout
+	await RenderingServer.frame_post_draw
+	runner.get_viewport().get_texture().get_image().save_png(out.path_join("awards_empty.png"))
 	var c := Career.new_game("LIUB", "A", "B", 314)
 	Game.career = c
 	for _w in 4:
@@ -232,7 +321,6 @@ static func shots(runner, out: String) -> void:
 	c.queue.clear()
 	for q in c.upgrades_due():
 		Development.ai_spend(q)
-	var tree: SceneTree = runner.get_tree()
 	for shot in [["awards", {}, "awards_week"], ["hub", {}, "awards_hub"]]:
 		Game.goto(String(shot[0]), shot[1])
 		await tree.create_timer(0.6).timeout
@@ -246,4 +334,23 @@ static func shots(runner, out: String) -> void:
 	await RenderingServer.frame_post_draw
 	runner.get_viewport().get_texture().get_image().save_png(out.path_join("awards_history.png"))
 	Game.current_screen.history = false
+	# the tournament pages (made-up honours, real players)
+	fake_tourney(c)
+	Game.current_screen.at = -1
+	Game.goto("awards")
+	await tree.create_timer(0.6).timeout
+	await RenderingServer.frame_post_draw
+	runner.get_viewport().get_texture().get_image().save_png(out.path_join("awards_ncsa_tourney.png"))
+	Game.current_screen.at -= 1
+	Game.current_screen._render()
+	await tree.create_timer(0.4).timeout
+	await RenderingServer.frame_post_draw
+	runner.get_viewport().get_texture().get_image().save_png(out.path_join("awards_conf_tourney.png"))
+	Game.current_screen.history = true
+	Game.current_screen._render()
+	await tree.create_timer(0.4).timeout
+	await RenderingServer.frame_post_draw
+	runner.get_viewport().get_texture().get_image().save_png(out.path_join("awards_history_tourney.png"))
+	Game.current_screen.history = false
+	Game.current_screen.at = -1
 	Game.career = null

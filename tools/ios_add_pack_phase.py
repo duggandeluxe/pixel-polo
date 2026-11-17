@@ -12,7 +12,19 @@ from pathlib import Path
 
 PHASE_ID = "5E0C0DE0A1B2C3D4E5F60001"
 PHASE_NAME = "Pack Godot project"
-BUNDLE_LINE = "PRODUCT_BUNDLE_IDENTIFIER = com.akikawasaki.retropolo;"
+def _bundle_id() -> str:
+    """The iOS preset's bundle identifier (game/export_presets.cfg): set it there, nowhere else."""
+    cfg = Path(__file__).resolve().parent.parent / "game" / "export_presets.cfg"
+    text = cfg.read_text(encoding="utf-8")
+    for section in re.split(r"^\[preset\.\d+\]$", text, flags=re.M):
+        if 'platform="iOS"' in section:
+            m = re.search(r'^application/bundle_identifier="([^"]*)"', section, flags=re.M)
+            if m:
+                return m.group(1)
+    sys.exit("error: no iOS bundle identifier in game/export_presets.cfg")
+
+
+BUNDLE_LINE = f"PRODUCT_BUNDLE_IDENTIFIER = {_bundle_id()};"
 
 PHASE_BLOCK = (
     f"\t\t{PHASE_ID} /* {PHASE_NAME} */ = {{\n"

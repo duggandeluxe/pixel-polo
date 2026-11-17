@@ -10,7 +10,6 @@ const DIR := "user://test_ratings/"
 var r   # the test runner
 
 func run(runner) -> void:
-	load("res://src/ui/screens/new_career.gd").start_filter = Colleges.D1   # (the Road to Glory's thirty; --test divisions has the rest)
 	r = runner
 	print("roster generation & ratings")
 	Store.reset_for_tests()
@@ -67,7 +66,7 @@ func _star_ovr(t: PoloTeam) -> int:
 # ------------------------------------------------------------------ T30, T41
 func _full_rosters() -> void:
 	var c := Game.dynasty_setup()
-	r.check(c.teams.size() == 54 and c.school == "", "T30: a setup has all 54 teams (a dynasty keeps the divisions it plays) and no school picked yet")
+	r.check(c.teams.size() == 30 and c.school == "", "T30: a setup has all 30 teams and no school picked yet")
 	var bad: Array = []
 	var ids := {}
 	var dup := false
@@ -84,7 +83,7 @@ func _full_rosters() -> void:
 			dup = dup or ids.has(p.id)
 			ids[p.id] = true
 	r.check(bad.is_empty(), "T30/T41: every team has a full roster, seven starters with a keeper, and all four ratings %s" % str(bad))
-	r.check(not dup and ids.size() == 54 * (Career.ROSTER_MAX + Career.BENCH_MAX), "T41: no player twice (%d players: every program's seven and its bench)" % ids.size())
+	r.check(not dup and ids.size() == 30 * (Career.ROSTER_MAX + Career.BENCH_MAX), "T41: no player twice (%d players: every program's seven and its bench)" % ids.size())
 	var rated := true
 	for id in c.teams:
 		rated = rated and _expect(c.teams[id]) == [c.teams[id].offense_display(), c.teams[id].defense_display(), c.teams[id].goalkeeping_display()]
@@ -177,7 +176,7 @@ func _picker_and_start() -> void:
 	var same := true
 	for tid in snap:
 		if tid == id or not after.has(tid):
-			continue   # (yours; and a division this Division I dynasty left out)
+			continue   # (yours)
 		same = same and who.call(after[tid][1]) == who.call(snap[tid][1])
 	r.check(same, "T35: every other team is the same players the picker showed (nobody made again)")
 	var mine: Array = after[id]
@@ -218,7 +217,7 @@ func _back_navigation() -> void:
 	var seed_value := Game.setup_seed
 	Game.setup = null
 	Game.setup_seed = 0
-	var again := Career.new_setup(seed_value, [1, 2, 3])
+	var again := Career.new_setup(seed_value)
 	r.check(_snap(again.teams) == first, "T36: the same seed makes exactly the same rosters")
 	Game.goto("title")
 	await r.get_tree().process_frame

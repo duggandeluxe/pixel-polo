@@ -91,7 +91,7 @@ func _slots() -> void:
 	# the red stars sit straight after the gold, inside the five places
 	r.check(C.call(3.0, F.NORMAL, F.HOT) == [3] and C.call(3.0, F.HOT, F.VERY_HOT) == [4], "heating a three-star: the fourth place, then the fifth, turn red")
 	r.check(C.call(3.0, F.VERY_HOT, F.NORMAL) == [3, 4], "VERY HOT to NORMAL: both red stars go")
-	r.check(C.call(5.0, F.NORMAL, F.VERY_HOT) == [3, 4] and C.call(4.0, F.HOT, F.VERY_HOT) == [3], "no room left in the five: the red stars take the top places (the gold gives way)")
+	r.check(C.call(5.0, F.NORMAL, F.VERY_HOT) == [5, 6] and C.call(4.0, F.HOT, F.VERY_HOT) == [5], "no room left in the five: the red stars go past it (the gold never gives way)")
 	r.check(C.call(4.0, F.HOT, F.HOT).is_empty(), "no change, nothing moves")
 	r.check(StarFx.form_place(3.0, 5.0, F.VERY_HOT) == 4 and StarFx.form_place(3.0, 5.0, F.HOT) == 3 and StarFx.form_place(3.0, 5.0, F.NORMAL) == -1,
 		"the idle sits on the last red star")
@@ -556,7 +556,8 @@ func _settings() -> void:
 	await tree.process_frame
 	r.check(not _has_button(Game.current_screen, "TEST PLAYER FORM"), "Settings: Developer Mode, off, no form lab")
 	Game.settings.dev_mode = true
-	Game.goto("settings", {}, false)
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings", {}, false)
 	await tree.process_frame
 	r.check(_has_button(Game.current_screen, "TEST PLAYER FORM"), "Developer Mode on: TEST PLAYER FORM")
 	Game.settings.dev_mode = dev_was

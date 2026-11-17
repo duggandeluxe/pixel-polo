@@ -142,6 +142,7 @@ func _penalties() -> void:
 	var res: Dictionary = c.coach_results.back()
 	r.check(float(sm.xp[k.id].get("mult", 1.0)) == 0.5 and res.outcome == "fail", "27.10: SAVES CHALLENGE missed: the displayed 0.5X")
 	r.check(res.lines.any(func(l): return "-10% HOT STAR" in String(l[0])), "...and -10%% HOT STAR PROGRESS, shown (%s)" % str(res.lines))
+	_hot_reward()
 	# never below nothing
 	var c2: Career = ce._career(409)
 	var p: PoloPlayer = ce._dev(c2)
@@ -155,6 +156,51 @@ func _penalties() -> void:
 	CoachEvents.apply(c3, ce._ev(c3, "star_in_making", b), 1)
 	var sm3: Dictionary = ce._play(c3, true)
 	r.check(not sm3.xp.has(b.id) and c3.coach_results.back().outcome == "fail" and c3.coach_pending.is_empty(), "didn't play: settled once, nothing to multiply or penalize")
+
+## Every challenge that risks HOT STAR PROGRESS on a miss pays the same amount on a success:
+## shown in its stakes, granted once, within the coaching boost's cap.
+func _hot_reward() -> void:
+	r.check(not CoachEvents.FAIL_HOT.is_empty(), "(the challenges that risk HOT STAR PROGRESS)")
+	for id in CoachEvents.FAIL_HOT:
+		var c: Career = ce._career(420)
+		var gk: bool = id == "keeper_confidence"
+		var p: PoloPlayer = ce._dev(c, gk)
+		var ev: Dictionary = ce._ev(c, id, p)
+		var st: Array = CoachEvents.stakes(c, ev, 1).map(func(l): return String(l[0]))
+		var pp := CoachEvents._pp(CoachEvents.HOT.loss)
+		r.check(st.has("SUCCESS: +%d%% HOT STAR PROGRESS" % pp) and st.has("FAILURE: -%d%% HOT STAR PROGRESS" % pp),
+			"%s: the success's +%d%% HOT STAR shown beside the failure's -%d%% %s" % [id, pp, pp, str(st)])
+		p.form = []
+		p.heat_bonus = 0.0
+		CoachEvents.apply(c, ev, 1)
+		var e: Dictionary = c.coach_pending.back()
+		r.check(is_equal_approx(float(e.hot_gain), float(e.hot_loss)), "%s: the reward saved equals the risk" % id)
+		var i := c.team().starters().find(p)
+		var box: Dictionary = ce.pg._box(c, [1, 2, 3] if gk else [i, i, i, 1], 2, {"saves": 14})
+		c.finish_my_game(box)
+		var res: Dictionary = c.coach_results.back()
+		r.check(res.outcome == "ok" and is_equal_approx(p.heat_bonus, CoachEvents.HOT.loss),
+			"%s made: +%d%% HOT STAR PROGRESS granted (heat_bonus %.2f)" % [id, pp, p.heat_bonus])
+		r.check(res.lines.any(func(l): return String(l[0]).begins_with("+%d%% HOT STAR" % pp) and String(l[1]) == "good"), "...and shown (%s)" % str(res.lines))
+		r.check(c.coach_pending.is_empty(), "...once: settled and gone")
+		var hb := p.heat_bonus
+		c.finish_my_game(ce.pg._box(c, [1, 2, 3], 2, {"saves": 14}))
+		r.check(is_equal_approx(p.heat_bonus, hb), "...never twice: the next game pays nothing more")
+	# the cap: the coaching boost never passes one GOOD grade's worth
+	var c2: Career = ce._career(421)
+	var k: PoloPlayer = ce._dev(c2, true)
+	k.heat_bonus = 0.9
+	CoachEvents.apply(c2, ce._ev(c2, "keeper_confidence", k), 1)
+	c2.finish_my_game(ce.pg._box(c2, [1, 2, 3], 2, {"saves": 14}))
+	r.check(is_equal_approx(k.heat_bonus, 1.0), "the reward stays within the cap (%.2f)" % k.heat_bonus)
+	# a challenge saved before the reward existed (no hot_gain) still pays its hot_loss's amount
+	var c3: Career = ce._career(422)
+	var k3: PoloPlayer = ce._dev(c3, true)
+	k3.heat_bonus = 0.0
+	CoachEvents.apply(c3, ce._ev(c3, "keeper_confidence", k3), 1)
+	(c3.coach_pending.back() as Dictionary).erase("hot_gain")
+	c3.finish_my_game(ce.pg._box(c3, [1, 2, 3], 2, {"saves": 14}))
+	r.check(is_equal_approx(k3.heat_bonus, CoachEvents.HOT.loss), "an older saved challenge: the same reward (%.2f)" % k3.heat_bonus)
 
 # ------------------------------------------------------------------ 27
 func _special_roll() -> void:

@@ -7,32 +7,23 @@ extends BaseScreen
 ##      star heating up (HEATING UP! / ON FIRE!), then moves on by itself (a tap skips the rest).
 ##      Nobody heated up: no such stage. The grades themselves (RAW, EXPECTED, +/-) are still
 ##      made and kept (PlayerForm.grade_team, his page's LAST GAME); they're just not shown here.
-##   3. the rest of the round rolls down instead (the conference, the tournament, or
-##      everyone, by the kind of round).
-##   4. tap: those roll away and UP NEXT slides up: the next opponent, then CREDITS EARNED, each
-##      reward on its own line (CreditRewards: WIN, UPSET VICTORY, WIN BY 5+, a streak...) and
-##      the TOTAL, the balance counting up from before the game. CONTINUE goes to the
-##      POSTGAME REVIEW (then maybe a coaching event), which ends the week.
+##   3. then straight on to PLAYER DEVELOPMENT (the bulletin board: every player's XP bar
+##      filling), then maybe a coaching event; the postgame ends the week. There's no POLO POINTS
+##      breakdown stage: FINAL already shows what the game paid, and the header the balance.
 ## Taps during a transition do nothing, so one tap never skips two stages. Every effect is
 ## worked out from the time alone (no per-frame state), so it costs next to nothing.
 
-enum Stage { FINAL, HOT, LEAGUE, NEXT }
+enum Stage { FINAL, HOT, NEXT }
 
 const NAVY := Color("071b3f")
-const ROW_A := Color(0.03, 0.09, 0.22, 0.88)
-const ROW_B := Color(0.03, 0.09, 0.22, 0.66)
 const YELLOW := Color("ffd83d")
 const MOVE := 0.35            # a stage's panels move this long
-const ROW_GAP := 0.05         # the league results roll in one after another
 const COMPACT_H := 36.0
-const ROW_H := 18.0
 const HINT_H := 14.0          # TAP TO CONTINUE, at the bottom
 const SCORE_SIZE := 47.0      # the final score, full size (it shrinks to COMPACT_SCORE in the strip)
 const COMPACT_SCORE := 26.0
-const CR_FILL := 0.8          # the CR bar fills this long once UP NEXT is in
 const WIN_FX := 2.0           # the confetti falls and fades over this long
 const LOSS_FX := 1.5
-const LOGO := 48.0            # the next opponent's logo, px
 
 var done := false
 var stage := Stage.FINAL
@@ -42,13 +33,6 @@ var s: Dictionary
 var g: Dictionary
 var won := false
 var opp: PoloTeam
-var league: Array = []        # the round's other games worth showing (see _league_games)
-var league_title := ""
-var next: Dictionary = {}
-var credit_lines: Array = []  # [[label, credits], ...]: what this game paid (CreditRewards)
-var cont_rect := Rect2()
-var cr_before := 0            # the wallet before this game, and now: the bar fills between them
-var cr_after := 0
 var bits: Array = []          # confetti / drift: {x, y, vy, sway, col, delay, size}, px from the panel's top centre
 var form: Array = []          # your seven's grades (PlayerForm.grade_team rows), keeper first
 var heaters: Array = []       # the ones whose form went up (HotReveal.heaters)
@@ -65,12 +49,7 @@ func _ready() -> void:
 	won = s.won
 	opp = c.teams[s.opp]
 	build(String(s.round), false, true)
-	_league_games()
 	form = s.get("form", [])
-	next = c.next_game()
-	credit_lines = s.get("credits", [])
-	cr_after = c.wallet()
-	cr_before = int(s.get("cr_before", cr_after - int(s.earned)))
 	_make_bits()
 	cv = UI.canvas(0, 0, _draw_stage)
 	cv.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -96,27 +75,6 @@ func _celebrate_records() -> void:
 	await get_tree().create_timer(0.9).timeout
 	if is_inside_tree():
 		RecordShow.play(self, broke)
-
-## The rest of this round, by what kind of game yours was: your conference's other games this
-## week after a conference game, every other game of a tournament round, and the same day's
-## games around the country otherwise.
-func _league_games() -> void:
-	var r: Dictionary = c.cur()
-	var kind := "conf" if Schedule.is_conf_game(r, g) and not Schedule.is_playoff(r) else String(r.get("kind", ""))
-	if kind == "conf":
-		league_title = "AROUND THE %s" % c.conf_abbr()
-	elif Schedule.is_playoff(r):
-		league_title = "AROUND THE TOURNAMENT"
-	else:
-		league_title = "AROUND COLLEGE WATER POLO"
-	for gg in r.games:
-		if gg == g or gg.r == null:
-			continue
-		if kind != "conf" and int(gg.get("d", 1)) != int(g.get("d", 1)):
-			continue
-		if kind == "conf" and (c.teams[gg.h] as PoloTeam).conf != c.team().conf and (c.teams[gg.a] as PoloTeam).conf != c.team().conf:
-			continue
-		league.append(gg)
 
 ## The pixels behind the FINAL panel: yellow and white confetti for a win, a few blue ones
 ## drifting down for a loss. Seeded from the game, so the same result always looks the same.
@@ -145,10 +103,6 @@ func _busy_for() -> float:
 	match stage:
 		Stage.HOT:
 			return 0.2
-		Stage.LEAGUE:
-			return MOVE + ROW_GAP * league.size() + 0.1
-		Stage.NEXT:
-			return MOVE * 2.0
 	return 0.35
 
 func _on_input(ev: InputEvent) -> void:
@@ -156,41 +110,31 @@ func _on_input(ev: InputEvent) -> void:
 		return
 	tap(ev.position)
 
-## A tap at `pos` (canvas px): the next stage, or CONTINUE on the last one.
-func tap(pos: Vector2) -> void:
+## A tap (`pos` in canvas px): on FINAL, the HOT reveal if anyone heated up, else on to PLAYER
+## DEVELOPMENT; during the reveal, skip it.
+func tap(_pos: Vector2 = Vector2.ZERO) -> void:
 	if done or t < _busy_for():
 		return
 	match stage:
 		Stage.FINAL:
 			Sfx.play("click")
-			stage = Stage.LEAGUE
 			t = 0.0
 			if reveal.start(heaters, c.team()):
 				stage = Stage.HOT
 				revealed = true
+			else:
+				stage = Stage.NEXT
+				_continue()
 		Stage.HOT:
 			reveal.skip()
-		Stage.LEAGUE:
-			stage = Stage.NEXT
-			t = 0.0
-			Sfx.play("click")
-		Stage.NEXT:
-			if cont_rect.has_point(pos):
-				_continue()
 
-## The reveal is over (played out, or skipped): on to the round.
+## The reveal is over (played out, or skipped): on to PLAYER DEVELOPMENT.
 func _reveal_done() -> void:
 	if stage != Stage.HOT:
 		return
-	stage = Stage.LEAGUE
+	stage = Stage.NEXT
 	t = 0.0
-
-## The CR shown right now on UP NEXT: counts up from before the game as the bar fills.
-func cr_shown() -> int:
-	if stage != Stage.NEXT:
-		return cr_before
-	var u := clampf((t - MOVE * 1.6) / CR_FILL, 0.0, 1.0)
-	return int(roundf(lerpf(cr_before, cr_after, u)))
+	_continue()
 
 # ------------------------------------------------------------------ drawing
 static func _ease(x: float) -> float:
@@ -200,16 +144,9 @@ static func _ease(x: float) -> float:
 func _draw_stage(ci: Control) -> void:
 	var sz := ci.size
 	var k := 0.0 if stage == Stage.FINAL else _ease(t / MOVE)
-	if stage == Stage.LEAGUE and revealed:
+	if stage == Stage.NEXT and revealed:
 		k = 1.0   # already a strip (the HOT reveal shrank it)
 	_draw_result(ci, sz, k)
-	if stage == Stage.LEAGUE:
-		_draw_league(ci, sz, t - MOVE * 0.6, 0.0)
-	elif stage == Stage.NEXT:
-		var out := _ease(t / MOVE)
-		if out < 1.0:
-			_draw_league(ci, sz, 99.0, out)
-		_draw_next(ci, sz, _ease((t - MOVE * 0.6) / MOVE))
 	if stage != Stage.NEXT and stage != Stage.HOT and t >= _busy_for():
 		_draw_hint(ci, sz)
 
@@ -269,11 +206,19 @@ func _draw_result(ci: Control, sz: Vector2, k: float) -> void:
 	UI.text(ci, Vector2(roundf(cx - sw / 2.0), sy), score, size, UI.TEXT, "big")
 	var gap := lerpf(14.0, 10.0, k)
 	var id_y := roundf(sy - lerpf(8.0, 3.0, k))
-	# the clubs by their short names, as big as the room beside the score allows
 	var room := w / 2.0 - sw / 2.0 - gap - 6.0
-	var styles := [[16, "big"], [8, "caps"], [8, "body"]]
-	Hud.draw_name(ci, Hud.fit_name(c.team(), room, styles), Vector2(roundf(cx - sw / 2.0 - gap - room), id_y), HORIZONTAL_ALIGNMENT_RIGHT, room)
-	Hud.draw_name(ci, Hud.fit_name(opp, room, styles), Vector2(roundf(cx + sw / 2.0 + gap), id_y), HORIZONTAL_ALIGNMENT_LEFT, room)
+	if k < 0.5:
+		# full size: the clubs' logos either side of the score, as big as the room allows
+		# (shrinking as the panel starts to shut; the strip goes back to names)
+		var lb := minf(minf(room, 60.0), lerpf(60.0, 28.0, k * 2.0))
+		var ly := roundf(sy - 15.0 * pop - lb / 2.0)
+		TeamLogo.draw_in(ci, Rect2(roundf(cx - sw / 2.0 - gap - (room + lb) / 2.0), ly, lb, lb), c.team())
+		TeamLogo.draw_in(ci, Rect2(roundf(cx + sw / 2.0 + gap + (room - lb) / 2.0), ly, lb, lb), opp)
+	else:
+		# the strip: the clubs by their short names, as big as the room beside the score allows
+		var styles := [[16, "big"], [8, "caps"], [8, "body"]]
+		Hud.draw_name(ci, Hud.fit_name(c.team(), room, styles), Vector2(roundf(cx - sw / 2.0 - gap - room), id_y), HORIZONTAL_ALIGNMENT_RIGHT, room)
+		Hud.draw_name(ci, Hud.fit_name(opp, room, styles), Vector2(roundf(cx + sw / 2.0 + gap), id_y), HORIZONTAL_ALIGNMENT_LEFT, room)
 	if k > 0.6:
 		var a := clampf((k - 0.6) / 0.4, 0.0, 1.0)
 		UI.text(ci, Vector2(x + 6, y + 13), "FINAL", 8, Color(UI.DIM, a), "caps")
@@ -329,127 +274,6 @@ static func _sparkle(ci: CanvasItem, p: Vector2, col: Color, r: int) -> void:
 	ci.draw_rect(Rect2(p.x - r, p.y, r * 2 + 1, 1), col)
 	ci.draw_rect(Rect2(p.x, p.y - r, 1, r * 2 + 1), col)
 
-## The rest of the round, rolling down a row at a time from under the heading (`since`: seconds
-## since it began). `out` 0..1 rolls it away again, down and off.
-func _draw_league(ci: Control, sz: Vector2, since: float, out: float) -> void:
-	if since < 0.0:
-		return
-	var top := 2.0 + COMPACT_H + 6.0 + roundf(out * sz.y)
-	# as narrow as the longest names allow
-	var name_w := 0.0
-	for gg in league:
-		name_w = maxf(name_w, UI.text_width(_fit(c.teams[gg.h] as PoloTeam, 150.0), 8, "caps"))
-		name_w = maxf(name_w, UI.text_width(_fit(c.teams[gg.a] as PoloTeam, 150.0), 8, "caps"))
-	var w := clampf(2.0 * (name_w + 44.0) + 20.0, 280.0, minf(400.0, sz.x - 16.0))
-	var x := roundf((sz.x - w) / 2.0)
-	var head_h := 16.0
-	ci.draw_rect(Rect2(x, top, w, head_h), Color(NAVY, 0.9))
-	UI.text(ci, Vector2(x, top + 12), league_title, 10, YELLOW, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-	var y0 := top + head_h
-	if league.is_empty():
-		ci.draw_rect(Rect2(x, y0, w, ROW_H), ROW_A)
-		UI.text(ci, Vector2(x, y0 + 12), "NO OTHER GAMES THIS ROUND", 8, UI.DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-		return
-	var room := int(floorf((sz.y - HINT_H - y0) / ROW_H))
-	var mid := roundf(x + w / 2.0)
-	for i in mini(league.size(), room):
-		var p := clampf((since - ROW_GAP * i) / 0.15, 0.0, 1.0)
-		if p <= 0.0:
-			break
-		var gg: Dictionary = league[i]
-		# rolls down out from under the row above: it shows from the top as it comes
-		var ry := y0 + i * ROW_H
-		ci.draw_rect(Rect2(x, ry, w, roundf(ROW_H * p)), ROW_A if i % 2 == 0 else ROW_B)
-		if p < 0.7:
-			continue
-		var hw: bool = Schedule.winner(gg) == gg.h
-		var hn := _fit(c.teams[gg.h] as PoloTeam, w / 2.0 - 44.0)
-		var an := _fit(c.teams[gg.a] as PoloTeam, w / 2.0 - 44.0)
-		var by := ry + 12.0
-		UI.text(ci, Vector2(mid - 38 - UI.text_width(hn, 8, "caps"), by), hn, 8, UI.TEXT if hw else UI.DIM, "caps")
-		UI.text(ci, Vector2(mid + 38, by), an, 8, UI.DIM if hw else UI.TEXT, "caps")
-		# the scores sit in fixed columns either side of the dash, one digit or two
-		var sc: Array = gg.r.s
-		UI.text(ci, Vector2(mid - 32, by + 2), str(sc[0]), 16, YELLOW if hw else UI.DIM, "big", HORIZONTAL_ALIGNMENT_CENTER, 24)
-		UI.text(ci, Vector2(mid - 8, by + 2), "-", 16, UI.DIM, "big", HORIZONTAL_ALIGNMENT_CENTER, 16)
-		UI.text(ci, Vector2(mid + 8, by + 2), str(sc[1]), 16, UI.DIM if hw else YELLOW, "big", HORIZONTAL_ALIGNMENT_CENTER, 24)
-		if not (gg.r.get("so", []) as Array).is_empty():
-			UI.text(ci, Vector2(x + w - 26, by), "PENS", 8, UI.DIM, "caps")
-
-## UP NEXT: slides up from the bottom (`k` 0..1) with CONTINUE under it; then the CR bar fills.
-func _draw_next(ci: Control, sz: Vector2, k: float) -> void:
-	if k <= 0.0:
-		cont_rect = Rect2()
-		return
-	var w := minf(300.0, sz.x - 16.0)
-	var h := 88.0 + _credits_h()
-	var target := 2.0 + COMPACT_H + 6.0
-	var y := roundf(lerpf(sz.y + 4.0, target, k))
-	var x := roundf((sz.x - w) / 2.0)
-	ci.draw_rect(Rect2(x, y, w, h), Color(NAVY, 0.9))
-	ci.draw_rect(Rect2(x, y, w, h), UI.BORDER, false, 1.0)
-	UI.text(ci, Vector2(x, y + 13), "UP NEXT", 8, YELLOW, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-	if next.is_empty():
-		UI.text(ci, Vector2(x, y + 50), "SEASON COMPLETE", 16, UI.TEXT, "big", HORIZONTAL_ALIGNMENT_CENTER, w)
-	elif next.get("tbd", false):
-		UI.text(ci, Vector2(x, y + 26), String(next.round).to_upper(), 8, UI.DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-		UI.text(ci, Vector2(x, y + 56), "OPPONENT TBD", 16, UI.TEXT, "big", HORIZONTAL_ALIGNMENT_CENTER, w)
-	else:
-		var nt: PoloTeam = c.teams[next.opp]
-		UI.text(ci, Vector2(x, y + 25), String(next.round).to_upper(), 8, UI.DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-		TeamLogo.draw_in(ci, Rect2(Vector2(x + 12, y + 30), Vector2(LOGO, LOGO)), nt)
-		var tx := x + 12 + LOGO + 10
-		# VS / AT and the opponent's short name, as big as fits
-		var vs := ("VS " if next.home else "AT ") + Colleges.short_name(nt).to_upper()
-		var vs_size := 24 if UI.text_width(vs, 24, "big") <= w - (tx - x) - 8 else 16
-		UI.text(ci, Vector2(tx, y + 52), vs, vs_size, UI.TEXT, "big")
-		UI.text(ci, Vector2(tx, y + 65), _fit(nt, w - (tx - x) - 8), 8, UI.TEXT, "caps")
-		UI.text(ci, Vector2(tx, y + 76), "RECORD %s    CONF %s" % [c.record_text(nt.id), c.conf_record_text(nt.id)], 8, UI.DIM, "caps")
-	ci.draw_rect(Rect2(x + 8, y + 86, w - 16, 1), Color(1, 1, 1, 0.2))
-	_draw_credits(ci, x, y + 88, w)
-	# CONTINUE: big and yellow, at the bottom, coming up with the panel
-	var bw := minf(198.0, w)
-	var by := roundf(lerpf(sz.y + 30.0, sz.y - 24.0, k))
-	cont_rect = Rect2(roundf((sz.x - bw) / 2.0), by, bw, 22)
-	ci.draw_rect(cont_rect, YELLOW)
-	ci.draw_rect(Rect2(cont_rect.position + Vector2(0, cont_rect.size.y - 2), Vector2(bw, 2)), YELLOW.darkened(0.3))
-	UI.text(ci, cont_rect.position + Vector2(0, 15), "CONTINUE  >", 8, NAVY, "caps", HORIZONTAL_ALIGNMENT_CENTER, bw)
-
-const CREDIT_ROW := 18.0      # a reward's line: room for the coin beside its number
-
-## CREDITS EARNED's height: the heading, a line a reward (two to a line), the TOTAL.
-func _credits_h() -> float:
-	var rows := maxi(1, ceili(credit_lines.size() / 2.0))
-	return 14.0 + rows * CREDIT_ROW + 22.0
-
-## CREDITS EARNED (this game's rewards, two to a line: "WIN  +3 (coin)"), then the TOTAL and the
-## balance, counting up from before the game as the panel settles.
-func _draw_credits(ci: Control, x: float, y: float, w: float) -> void:
-	UI.text(ci, Vector2(x + 10, y + 11), "CREDITS EARNED", 8, YELLOW, "caps")
-	CreditCoin.draw_amount(ci, x + w - 10, y + 7, str(cr_shown()), 8, UI.TEXT, "caps", 16, 2)
-	var top := y + 14.0
-	if credit_lines.is_empty():
-		UI.text(ci, Vector2(x, top + 12), "NO CREDITS THIS GAME" if not won or Schedule.is_playoff(c.cur()) else "", 8, UI.DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, w)
-	var col_w := (w - 20.0) / 2.0
-	for i in credit_lines.size():
-		var ln: Array = credit_lines[i]
-		var cx := x + 10.0 + (i % 2) * col_w
-		var cy := top + floorf(i / 2.0) * CREDIT_ROW + CREDIT_ROW * 0.5
-		UI.text(ci, Vector2(cx, cy + 3), Deck.fit("%s:" % String(ln[0]), col_w - 44.0), 8, UI.TEXT, "caps")
-		CreditCoin.draw_amount(ci, cx + col_w - 6.0, cy, CreditCoin.text(int(ln[1]), true), 8, YELLOW, "caps", 16, 2)
-	var ty := top + maxi(1, ceili(credit_lines.size() / 2.0)) * CREDIT_ROW + 11.0
-	CreditCoin.draw_amount(ci, x, ty, "TOTAL: %s" % CreditCoin.text(CreditRewards.total(credit_lines), true), 16, YELLOW, "big", 20, 1, w)
-
-## A segmented pixel bar, `p` 0..1 full.
-func _bar(ci: Control, r: Rect2, p: float) -> void:
-	ci.draw_rect(r, UI.INK)
-	var cells := 20
-	var cw := floorf((r.size.x - 2.0) / cells)
-	var lit := int(floorf(p * cells + 0.0001))
-	for i in cells:
-		var cr := Rect2(r.position.x + 1 + i * cw, r.position.y + 1, cw - 1, r.size.y - 2)
-		ci.draw_rect(cr, YELLOW if i < lit else Color(1, 1, 1, 0.12))
-
 func _draw_hint(ci: Control, sz: Vector2) -> void:
 	var blink := 0.6 + 0.4 * sin(t * 5.0)
 	var txt := "TAP TO CONTINUE"
@@ -466,9 +290,10 @@ static func _fit(team: PoloTeam, w: float) -> String:
 func on_back() -> void:
 	_continue()
 
-## On to the POSTGAME REVIEW (then maybe a coaching event; the postgame ends the week).
+## On to PLAYER DEVELOPMENT (your roster's XP on the bulletin board), the last postgame screen
+## (then maybe a coaching event; the postgame ends the week).
 func _continue() -> void:
 	if done:
 		return
 	done = true
-	Game.goto("postgame_review")
+	Game.goto("player_development")

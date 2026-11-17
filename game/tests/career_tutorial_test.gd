@@ -48,8 +48,9 @@ func _clear() -> void:
 
 # ------------------------------------------------------------------ helpers
 ## A new career the way a player makes one: the NEW CAREER screen's START.
-func _new_career():
+func _new_career(first_ever: bool = true):
 	_clear()
+	Game.settings["career_tutorial_seen"] = not first_ever
 	Game.career = null
 	Game.slot = 1
 	Game.goto("new_career")
@@ -122,12 +123,16 @@ func _launch() -> void:
 	r.check(Game.career != null and Game.career.tutorial == Career.TUTORIAL_PENDING and _saved_tutorial() == Career.TUTORIAL_PENDING, "1: the career is already made and saved, the tutorial pending")
 	r.check(Game.slot_exists(1), "1: in its slot")
 	r.check(ms.part == 0 and ms.drill_id == "frontcourt", "1: from part 1")
-	# a second career gets it too, whatever the practice run had kept as done
+	r.check(Game.settings.career_tutorial_seen == true, "1: noted as seen")
+	# the first one from part 1, whatever the practice run had kept as done
 	Game.settings["tutorials_done"] = Drill.ORDER.duplicate()
 	ms = await _new_career()
-	r.check(Game.current_name == "drill" and ms.part == 0, "1: every new career, from part 1, whatever's been practised")
+	r.check(Game.current_name == "drill" and ms.part == 0, "1: the first career, from part 1, whatever's been practised")
 	r.check((Game.settings.tutorials_done as Array).size() == Drill.ORDER.size(), "1: the practice run's progress left alone")
 	Game.settings["tutorials_done"] = []
+	# a later dynasty goes straight to the hub
+	await _new_career(false)
+	r.check(Game.current_name == "hub" and Game.career != null and Game.career.tutorial == "", "1: a later dynasty skips the tutorial (%s)" % Game.current_name)
 
 # ------------------------------------------------------------------ 2, 3: the pop-ups
 func _popups() -> void:
@@ -267,13 +272,13 @@ func _loading() -> void:
 	var old: Dictionary = Game.career.to_dict()
 	old.erase("tutorial")
 	r.check(Career.from_dict(old).tutorial == "", "8: an older save has no tutorial to do")
-	# nothing launches it but NEW CAREER (and the guide's practice run)
+	# nothing launches it but NEW CAREER (and the practice runs: the guide, Settings)
 	var launchers: Array = []
 	_scan("res://src", func(path: String, text: String):
 		if text.contains("goto(\"drill\""):
 			launchers.append(path.get_file()))
 	launchers.sort()
-	r.check(launchers == ["howto.gd", "new_career.gd"], "8: only NEW CAREER and the GAME GUIDE open it %s" % str(launchers))
+	r.check(launchers == ["howto.gd", "new_career.gd", "settings.gd"], "8: only NEW CAREER, the GAME GUIDE and SETTINGS open it %s" % str(launchers))
 	# the practice run from the guide: pop-ups, no career, BACK as ever
 	await _new_career()
 	var c: Career = Game.career

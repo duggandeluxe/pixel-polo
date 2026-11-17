@@ -11,6 +11,7 @@ config_version=5
 [application]
 
 config/name="Retro Polo"
+config/name.ios="Pixel Polo"
 config/description="Pixel Polo: Water Polo Dynasty. Retro-style college water polo: run the program, play every attack."
 config/version="0.1.0"
 run/main_scene="res://src/main.tscn"
@@ -30,8 +31,10 @@ general/ios/mix_with_others=true
 UI="*res://src/autoload/ui.gd"
 Sfx="*res://src/autoload/sfx.gd"
 Game="*res://src/autoload/game.gd"
+Ads="*res://src/autoload/ads.gd"
 Store="*res://src/autoload/store.gd"
 Net="*res://src/autoload/net.gd"
+Loc="*res://src/autoload/loc.gd"
 
 [display]
 
@@ -54,6 +57,11 @@ common/drop_mouse_on_gui_input_disabled=true
 [input_devices]
 
 pointing/emulate_touch_from_mouse=true
+
+[internationalization]
+
+locale/include_text_server_data=true
+locale/fallback="en_US"
 
 [rendering]
 

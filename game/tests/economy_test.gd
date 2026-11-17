@@ -20,20 +20,29 @@ func run(runner) -> void:
 	Game.career = null
 
 func _prices() -> void:
-	for id in ["goal", "crowd", "victory", "pregame"]:
-		r.check(VisualUpgrades.top(id) == 4 and VisualUpgrades.category_cost(id) == 875, "%s: 125, 250, 500" % id)
-	r.check(VisualUpgrades.category_cost("broadcast") == 375 and VisualUpgrades.category_cost("replay") == 500, "Broadcast 375, Instant Replay 500")
+	r.check(VisualUpgrades.top("pregame") == 3 and VisualUpgrades.category_cost("pregame") == 375, "pregame: 125, 250 (Level 4 removed)")
+	# an older save that owned and wore the removed Level 4 (Starting 7): Level 3, everything below kept
+	var old := VisualUpgrades.from_dict({"unlocked": {"pregame": 4, "crowd": 3}, "equipped": {"pregame": 4},
+		"bought": [{"txn": "x", "what": "pregame:4", "n": 500, "cur": Wallet.YELLOW}], "crowd_v": 1, "celeb_v": 1})
+	r.check(old.level("pregame") == 3 and old.worn("pregame") == 3 and int(old.unlocked.pregame) == 3 and int(old.equipped.pregame) == 3,
+		"a save with the old Level 4: owns and wears Level 3, the new top")
+	r.check(old.level("crowd") == 3 and old.bought.size() == 1 and old.tier_block("pregame", null) == "MAX LEVEL UNLOCKED",
+		"other upgrades and the purchase record kept; nothing left to buy (MAXED OUT)")
+	r.check(VisualUpgrades.top("crowd") == 3 and VisualUpgrades.category_cost("crowd") == 375, "crowd: 125, 250")
+	r.check(VisualUpgrades.top("goal") == 4 and VisualUpgrades.category_cost("goal") == 300 and VisualUpgrades.CELEB_PRICES == [0, 50, 100, 150],
+		"Goal Celebrations: CLASSIC free, then 50, 100, 150, each on its own")
+	r.check(VisualUpgrades.category_cost("broadcast") == 375 and VisualUpgrades.cat("replay").is_empty(), "Broadcast 375; Instant Replay is gone")
 	var c := Career.new_game("GWU", "E", "C", 700)
 	c.credits = 100
 	var lk := VisualUpgrades.new()
 	var v := CoinVault.new()
-	r.check(lk.tier_block("goal", c, v) == "NOT ENOUGH YELLOW COINS", "short of coins: says so")
-	r.check(lk.buy_tier("goal", c, v) != "" and c.credits == 100 and lk.level("goal") == 1, "...and nothing moves")
+	r.check(lk.tier_block("crowd", c, v) == "NOT ENOUGH POLO POINTS", "short of coins: says so")
+	r.check(lk.buy_tier("crowd", c, v) != "" and c.credits == 100 and lk.level("crowd") == 1, "...and nothing moves")
 	v.credit(25, "t")
-	r.check(lk.buy_tier("goal", c, v) == "" and c.credits == 0 and v.balance == 0 and lk.level("goal") == 2 and v.open.is_empty(), "the dynasty's coins first, the shared ones after, final at once")
-	r.check(lk.worn("goal") == 2, "buying wears it")
-	r.check(not lk.equip("goal", 3), "a level not owned can't be worn")
-	r.check(VisualUpgrades.from_dict(lk.to_dict()).level("goal") == 2, "ownership saves")
+	r.check(lk.buy_tier("crowd", c, v) == "" and c.credits == 0 and v.balance == 0 and lk.level("crowd") == 2 and v.open.is_empty(), "the dynasty's coins first, the shared ones after, final at once")
+	r.check(lk.worn("crowd") == 2, "buying wears it")
+	r.check(not lk.equip("crowd", 3), "a level not owned can't be worn")
+	r.check(VisualUpgrades.from_dict(lk.to_dict()).level("crowd") == 2, "ownership saves")
 	var top := VisualUpgrades.from_dict({"unlocked": {"broadcast": 3}})
 	r.check(top.tier_block("broadcast", c, v) == "MAX LEVEL UNLOCKED", "Broadcast stops at 3")
 
@@ -82,8 +91,11 @@ func _old_store_on_disk() -> void:
 	# 40 kept + 25 x 5 + (100 + 50 + 50) x 5
 	r.check(Store.vault == 40 + 125 + 1000, "balance + refunds at 5:1: %d" % Store.vault)
 	r.check(Store.ledger.balance == 0 and Store.econ_v == EconomyMigration.VERSION, "the old balance is retired, the version marked")
-	r.check(Store.looks.level("goal") == 3 and Store.looks.worn("goal") == 2 and Store.looks.level("victory") == 2, "visual upgrades stay as owned and worn")
-	r.check(Store.looks.level("replay") == 2 and Store.looks.worn("replay") == 1, "a paid replay owner has the unlock; one who'd switched it off still has it off")
+	r.check(Store.looks.level("broadcast") == 3 and not Store.looks.unlocked.has("victory") and VisualUpgrades.cat("victory").is_empty(),
+		"visual upgrades stay as owned; the retired Victory Presentation levels are dropped")
+	r.check(Store.looks.celebs == [1, 2] and Store.looks.worn_celeb() == 1 and not Store.looks.unlocked.has("goal"),
+		"old Goal Celebrations Level 3 (worn 2): CONFETTI POPPERS and WATER EXPLOSION owned, CONFETTI worn, the old tiers gone")
+	r.check(not Store.looks.unlocked.has("replay") and not Store.looks.equipped.has("replay"), "the removed Instant Replay is dropped from an old save (nothing refunded, nothing else touched)")
 	r.check(Store.looks.level("broadcast") == 3 and Store.looks.worn("broadcast") == 3, "Broadcast Level 4 down to 3")
 	r.check(Store.looks.packs.is_empty() and Store.looks.enabled.is_empty() and Store.looks.theme == VisualUpgrades.THEME_DEFAULT and Store.looks.retired_packs.size() == 2, "the packs retired")
 	r.check(Store.seen("blue-1") and Store.seen("old-1"), "transactions already delivered stay delivered")
@@ -141,12 +153,12 @@ func _saves_on_disk() -> void:
 	# an upgrade bought with the dynasty's coins: both files at once, so a reload can't undo the price
 	Game.career.credits = 200
 	Game.save_career()
-	r.check(Store.buy_tier("goal") == "" and Game.career.credits == 75, "an upgrade paid from the dynasty")
+	r.check(Store.buy_tier("crowd") == "" and Game.career.credits == 75, "an upgrade paid from the dynasty")
 	Store._load()
 	Game.load_career(1)
-	r.check(Game.career.credits == 75 and Store.looks.level("goal") == 2, "reloading keeps the coins spent and the level owned")
+	r.check(Game.career.credits == 75 and Store.looks.level("crowd") == 2, "reloading keeps the coins spent and the level owned")
 	Game.load_career(2)
-	r.check(Game.career.credits == 25 and Wallet.yellow(Game.career) == 100 and Store.looks.level("goal") == 2, "B: its own 25, the shared 75, the same upgrades")
+	r.check(Game.career.credits == 25 and Wallet.yellow(Game.career) == 100 and Store.looks.level("crowd") == 2, "B: its own 25, the shared 75, the same upgrades")
 	# bought coins follow you; coins earned in one dynasty stay in it
 	Game.career.add_credits(40, "WIN")
 	Game.save_career()

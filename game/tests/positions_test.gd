@@ -157,7 +157,7 @@ func _eligibility() -> void:
 	r.check(t.slot_name(2) == "WG" and t.slot_name(3) == "ATK", "...back to ATK and WG when he's gone")
 	var m := {"GK": _man(GK, 6), "C": _man(C, 6), "2MD": _man(MD, 6), "ATK": _man(ATK, 6), "WG": _man(WG, 6), "UT": _man(UT, 6), "LFTY": _man(ATK, 6, true)}
 	# [place, who may play it]
-	var table := [[0, ["GK"]], [1, ["C", "2MD"]], [4, ["2MD", "C"]], [5, ["ATK", "WG", "UT"]], [6, ["ATK", "WG", "UT"]],
+	var table := [[0, ["GK"]], [1, ["C", "2MD"]], [4, ["2MD", "C", "UT"]], [5, ["ATK", "WG", "UT"]], [6, ["ATK", "WG", "UT"]],
 		[3, ["ATK", "WG", "UT", "LFTY"]], [2, ["ATK", "WG", "UT", "LFTY"]], [7, m.keys()], [9, m.keys()]]
 	var ok := true
 	var wrong := []
@@ -167,6 +167,8 @@ func _eligibility() -> void:
 				ok = false
 				wrong.append("%s at %d" % [k, int(row[0])])
 	r.check(ok, "who may play where: GK only in goal; C, 2MD on the posts; ATK, WG, UT outside, a LFTY only on the right side's two; anybody on the bench %s" % [wrong])
+	r.check(PoloTeam.fit_rank(m.UT, 4) == 1 and PoloTeam.fit_rank(m["2MD"], 4) == 0 and not PoloTeam.fits(m.UT, 1) and not PoloTeam.fits(m.LFTY, 4),
+		"a UT may play 2MD (behind a 2MD), never C; a lefty never 2MD")
 	r.check(PoloTeam.fit_rank(m.C, 1) == 0 and PoloTeam.fit_rank(m["2MD"], 1) == 1 and PoloTeam.fit_rank(m["2MD"], 4) == 0 and PoloTeam.fit_rank(m.C, 4) == 1, "C prefers a centre, 2MD a 2MD")
 
 # ------------------------------------------------------------------ lineups

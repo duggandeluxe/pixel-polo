@@ -49,8 +49,11 @@ func _on_transaction(t: Dictionary) -> void:
 	match int(t.get("transaction_state", TS_FAILED)):
 		TS_PURCHASED, TS_RESTORED:
 			if id in store.NON_CONSUMABLES:
-				store._on_owned(id)
-				store._finish_inflight(id, true, "")
+				if id == store._inflight:
+					store._on_purchased(id, str(t.get("transaction_id", t.get("id", ""))))   # (bought now: PRO's coins once)
+				else:
+					store._on_owned(id)
+					store._finish_inflight(id, true, "")
 			else:
 				# its transaction id, when the plugin gives one: credited once (CoinVault.seen)
 				store._on_purchased(id, str(t.get("transaction_id", t.get("id", ""))))

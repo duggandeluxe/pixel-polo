@@ -14,6 +14,12 @@ extends Control
 ##   CONTINUE (usable at once: a tap anywhere else finishes the animation)
 ## Each award's accent: POTW gold, OPOTW orange, DPOTW cyan, ROTW green. Nothing here grants,
 ## records or changes an award: it only shows the record it's given.
+##
+## PLAYER OF THE TOURNAMENT (the Postseason Awards update): a TourneyAwards record (it has a
+## `tid`) is shown the same way, grander: CONFERENCE TOURNAMENT / NATIONAL CHAMPIONSHIP on a
+## ribbon above the award, a sunburst behind it, a double gold frame with gold corner studs (the
+## national one heavier still: a gold ribbon, a checker trim, a gold-leaf plaque, more sparkles),
+## and the tournament's totals (games first).
 
 signal finished
 
@@ -104,25 +110,39 @@ func _draw() -> void:
 	if r.is_empty():
 		return
 	var cat := String(r.get("cat", "potw"))
+	var tourney := is_tourney(r)
+	var nat := is_national(r)
 	var acc: Color = ACCENTS.get(cat, GOLD)
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.01, 0.03, 0.1, 0.8))
 	var pr := _panel()
-	# the panel: navy, a thick gold border, the award's colour inside it
+	# the panel: navy, a thick gold border, the award's colour inside it (a tournament's: its own frame)
 	draw_rect(Rect2(pr.position + Vector2(3, 3), pr.size), Color(0, 0, 0, 0.45))
 	draw_rect(pr, NAVY)
-	draw_rect(pr, GOLD, false, 3.0)
-	draw_rect(pr.grow(-4), Color(acc, 0.7), false, 1.0)
+	if tourney:
+		_tourney_frame(pr, nat)
+	else:
+		draw_rect(pr, GOLD, false, 3.0)
+		draw_rect(pr.grow(-4), Color(acc, 0.7), false, 1.0)
 	var cx := pr.get_center().x
 	# the award, popping in
 	if t >= T_HEAD:
 		var s := t - T_HEAD
 		var sc := BarHit.pop(s) if s < BarHit.OUT_AT and motion else 1.0
-		var word := String(ConfAwards.TITLES.get(cat, "AWARD")) + "!"
+		var titles: Dictionary = TourneyAwards.TITLES if tourney else ConfAwards.TITLES
+		var word := String(titles.get(cat, "AWARD")) + "!"
 		var fs := BarHit.word_fs(word, sc, pr.size.x - 40.0)
-		var shade: Array = [BarHit.ORANGE, BarHit.RED] if cat in ["potw", "opotw"] else [acc.darkened(0.3), acc.darkened(0.65)]
-		BarHit.lettering(self, Vector2(cx + (BarHit.shake_x(s) if motion else 0.0), pr.position.y + 24), word, fs, 1.0, GOLD, shade[0], shade[1])
-		var conf: String = String(Colleges.conference(String(r.get("conf", ""))).get("name", String(r.get("conf", ""))))
-		UI.text(self, Vector2(pr.position.x, pr.position.y + 46), "%s  -  %s" % [String(conf).to_upper(), String(r.get("label", "")).to_upper()],
+		var shade: Array = [BarHit.ORANGE, BarHit.RED] if cat in ["potw", "opotw", "pot", "opot"] else [acc.darkened(0.3), acc.darkened(0.65)]
+		var word_y := pr.position.y + (32 if tourney else 24)
+		BarHit.lettering(self, Vector2(cx + (BarHit.shake_x(s) if motion else 0.0), word_y), word, fs, 1.0, GOLD, shade[0], shade[1])
+		if tourney:
+			# the kicker, on a ribbon: CONFERENCE TOURNAMENT / NATIONAL CHAMPIONSHIP (gold for the national)
+			var kick := "NATIONAL CHAMPIONSHIP" if nat else "CONFERENCE TOURNAMENT"
+			var kw := Deck.text_w(kick, 8, "caps") + 16.0
+			var rib := Rect2(Vector2(floorf(cx - kw * 0.5), pr.position.y + 7), Vector2(kw, 11))
+			draw_rect(rib, GOLD if nat else NAVY)
+			draw_rect(rib, GOLD, false, 1.0)
+			UI.text(self, Vector2(rib.position.x, rib.position.y + 9), kick, 8, NAVY if nat else GOLD, "caps", HORIZONTAL_ALIGNMENT_CENTER, rib.size.x)
+		UI.text(self, Vector2(pr.position.x, pr.position.y + (52 if tourney else 46)), subtitle(r),
 			8, Color("5cc8ff"), "caps", HORIZONTAL_ALIGNMENT_CENTER, pr.size.x)
 	var mid_top := pr.position.y + 56
 	var p := ConfAwards.player_of(c, r) if c != null else null
@@ -167,15 +187,18 @@ func _draw() -> void:
 			draw_colored_polygon(PackedVector2Array([Vector2(x, plaque.position.y), Vector2(x + 8, plaque.position.y),
 				Vector2(x + 2, plaque.end.y), Vector2(x - 6, plaque.end.y)]), Color(1, 1, 1, 0.45))
 		if t >= T_DONE and motion:
-			for j in 6:
-				var a := t * 2.0 + j * TAU / 6.0
+			var n := 12 if nat else (8 if tourney else 6)
+			for j in n:
+				var a := t * 2.0 + j * TAU / n
 				var sp := plaque.get_center() + Vector2(cos(a) * (pw * 0.6), sin(a) * (ph * 0.75))
+				if nat and j % 2 == 1:
+					sp = plaque.get_center() + Vector2(cos(-a) * (pw * 0.72), sin(-a) * ph)   # (a second ring, turning the other way)
 				var tw := 0.5 + 0.5 * sin(t * 6.0 + j)
 				_sparkle(sp.round(), Color(GOLD, tw))
 	# the week's numbers
 	if t >= T_STATS:
 		var by := pr.end.y - 72
-		UI.text(self, Vector2(pr.position.x, by), "AWARD-WINNING PERFORMANCE", 8, GOLD, "caps", HORIZONTAL_ALIGNMENT_CENTER, pr.size.x)
+		UI.text(self, Vector2(pr.position.x, by), "TOURNAMENT TOTALS" if tourney else "AWARD-WINNING PERFORMANCE", 8, GOLD, "caps", HORIZONTAL_ALIGNMENT_CENTER, pr.size.x)
 		var st := stats_of(r)
 		var bw := 74.0
 		var gap := 8.0
@@ -192,18 +215,27 @@ func _draw() -> void:
 
 ## The weekly plaque, as the Trophy Room hangs it (its brass, bevel, screws and engraving), at `r`.
 func _plaque(r: Rect2, rc: Dictionary, a: float) -> void:
+	var nat := is_national(rc)
+	var dark: Color = Color("a8740c") if nat else TrophyRoom.BRASS_D   # (the national's: gold leaf)
+	var mid: Color = GOLD if nat else TrophyRoom.BRASS
+	var light: Color = Color("fff3a8") if nat else TrophyRoom.BRASS_L
 	draw_rect(Rect2(r.position + Vector2(2, 2), r.size), Color(0, 0, 0, 0.4 * a))
-	draw_rect(r, Color(TrophyRoom.BRASS_D, a))
-	draw_rect(r.grow(-1), Color(TrophyRoom.BRASS, a))
-	draw_rect(Rect2(r.position + Vector2(1, 1), Vector2(r.size.x - 2, 1)), Color(TrophyRoom.BRASS_L, a))
-	draw_rect(Rect2(r.position + Vector2(1, r.size.y - 2), Vector2(r.size.x - 2, 1)), Color(TrophyRoom.BRASS_D, a))
+	draw_rect(r, Color(dark, a))
+	draw_rect(r.grow(-1), Color(mid, a))
+	draw_rect(Rect2(r.position + Vector2(1, 1), Vector2(r.size.x - 2, 1)), Color(light, a))
+	draw_rect(Rect2(r.position + Vector2(1, r.size.y - 2), Vector2(r.size.x - 2, 1)), Color(dark, a))
 	for sx in [r.position.x + 6, r.end.x - 7]:
 		draw_rect(Rect2(sx - 2, r.get_center().y - 2, 4, 4), Color("9aa0aa", a))
 		draw_rect(Rect2(sx - 2, r.get_center().y - 1, 4, 1), Color("50545c", a))
 	var yr := NationalAwards.earned_year(String(rc.get("season", "")))
-	var top := ("%d %s" % [yr, String(rc.get("label", ""))]) if yr > 0 else String(rc.get("label", ""))
-	UI.text(self, Vector2(r.position.x, r.position.y + 21), top.to_upper(), 16, Color(TrophyRoom.INK, a), "big", HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var what := String(rc.get("label", ""))
 	var short := "%s %s" % [Colleges.conf_abbr(String(rc.get("conf", ""))), String(ConfAwards.SHORT.get(String(rc.get("cat", "")), ""))]
+	if is_tourney(rc):
+		var tid := String(rc.tid)
+		what = "NCSA" if tid == "nat" else Colleges.conf_abbr(String(rc.get("conf", "")))
+		short = String(TourneyAwards.SHORT.get(String(rc.get("cat", "")), ""))
+	var top := ("%d %s" % [yr, what]) if yr > 0 else what
+	UI.text(self, Vector2(r.position.x, r.position.y + 21), top.to_upper(), 16, Color(TrophyRoom.INK, a), "big", HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	UI.text(self, Vector2(r.position.x, r.position.y + 42), short, 16, Color(TrophyRoom.INK, a), "big", HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 
 func _sparkle(p: Vector2, col: Color) -> void:
@@ -222,6 +254,21 @@ static func stats_of(r: Dictionary) -> Array:
 	var add := func(k: String, label: String) -> void:
 		if ln.has(k):
 			out.append([str(int(ln[k])), label])
+	if is_tourney(r):
+		# a tournament's totals: the games first, then what he did in them
+		add.call("gp", "GAMES")
+		if int(r.get("pos", -1)) == PoloPlayer.Pos.GK:
+			add.call("sv", "SAVES")
+			var faced := int(ln.get("sv", 0)) + int(ln.get("ga", 0))
+			if faced > 0:
+				out.append(["%d%%" % roundi(100.0 * int(ln.get("sv", 0)) / faced), "SAVE RATE"])
+			add.call("ga", "GOALS ALLOWED")
+		else:
+			add.call("g", "GOALS")
+			add.call("a", "ASSISTS")
+			add.call("st", "STEALS")
+			add.call("bl", "BLOCKS")
+		return out.slice(0, 4)
 	if int(r.get("pos", -1)) == PoloPlayer.Pos.GK:
 		add.call("sv", "SAVES")
 		if ln.has("sv") and ln.has("ga") and int(ln.sv) + int(ln.ga) > 0:
@@ -240,3 +287,55 @@ static func stats_of(r: Dictionary) -> Array:
 	if out.size() < 3:
 		add.call("gp", "GAMES")
 	return out.slice(0, 4)
+
+## A tournament's award (TourneyAwards' record: it names its tournament), not a week's.
+static func is_tourney(r: Dictionary) -> bool:
+	return r.has("tid")
+
+## A national championship's (the NCSA's).
+static func is_national(r: Dictionary) -> bool:
+	return String(r.get("tid", "")) == "nat"
+
+## The line under the award: the conference and the week, or the tournament and its year.
+static func subtitle(r: Dictionary) -> String:
+	if is_tourney(r):
+		var tid := String(r.tid)
+		var yr := NationalAwards.earned_year(String(r.get("season", "")))
+		var name := "NCSA CHAMPIONSHIP"
+		if tid != "nat":
+			name = "%s TOURNAMENT" % Colleges.conf_abbr(String(r.get("conf", "")))
+		return ("%s  -  %d" % [name, yr]) if yr > 0 else name
+	var conf: String = String(Colleges.conference(String(r.get("conf", ""))).get("name", String(r.get("conf", ""))))
+	return "%s  -  %s" % [conf.to_upper(), String(r.get("label", "")).to_upper()]
+
+## A tournament's frame: a sunburst turning slowly behind everything, a double gold border, gold
+## corner studs; the national's heavier (a 4px border with an orange line inside it, a gold checker
+## trim top and bottom, brighter rays).
+func _tourney_frame(pr: Rect2, nat: bool) -> void:
+	var c0 := Vector2(pr.get_center().x, pr.position.y + 32)
+	var spin := t * 0.15 if motion else 0.0
+	var box := PackedVector2Array([pr.position, Vector2(pr.end.x, pr.position.y), pr.end, Vector2(pr.position.x, pr.end.y)])
+	var reach := pr.size.length()
+	var rays := 16
+	for j in rays:
+		var a0 := spin + j * TAU / rays
+		var a1 := a0 + TAU / rays * 0.5
+		var tri := PackedVector2Array([c0, c0 + Vector2(cos(a0), sin(a0)) * reach, c0 + Vector2(cos(a1), sin(a1)) * reach])
+		for poly in Geometry2D.intersect_polygons(tri, box):
+			draw_colored_polygon(poly, Color(GOLD, 0.09 if nat else 0.05))
+	var w := 4.0 if nat else 3.0
+	draw_rect(pr, GOLD, false, w)
+	draw_rect(pr.grow(-w - 1), BarHit.ORANGE if nat else Color(GOLD, 0.8), false, 1.0)
+	draw_rect(pr.grow(-w - 3), Color(GOLD, 0.5), false, 1.0)
+	if nat:
+		var x := pr.position.x + w + 5
+		var k := 0
+		while x + 4 <= pr.end.x - w - 5:
+			if k % 2 == 0:
+				draw_rect(Rect2(x, pr.end.y - w - 9, 4, 4), Color(GOLD, 0.55))
+			x += 4
+			k += 1
+	for corner in [pr.position, Vector2(pr.end.x, pr.position.y), Vector2(pr.position.x, pr.end.y), pr.end]:
+		var q := (corner as Vector2) - Vector2(4, 4)
+		draw_rect(Rect2(q, Vector2(8, 8)), GOLD)
+		draw_rect(Rect2(q + Vector2(2, 2), Vector2(4, 4)), BarHit.ORANGE if nat else NAVY)

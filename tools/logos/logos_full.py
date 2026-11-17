@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image
 from scipy import ndimage
-import small
+import small, fine
 
 IDS = ["CULA", "CUSC", "ALC", "FORDU", "SJCU", "LBSC", "CUSD", "PRIN", "PPCU", "ICU", "UCDS", "CRBU",
        "LMMU", "HVRD", "UPAC", "CCSB", "BROW", "NANA", "GWU", "SCCU", "USAF", "CSFU", "SMCC",
@@ -19,11 +19,11 @@ SMALL_TAGS = ("s", "m")
 ## dedicated small variant (small.py: the body and one ring of its own trim), chosen by looking at
 ## each one side by side (2026-10-30): fine detail (arrows, feathers, script, outlined lettering)
 ## that turns to noise in 20 x 12 or 28 x 20 pixels.
-SMALL_VARIANTS = {"SJCU": ("s", "m"), "CCSB": ("s", "m"), "SMCC": ("s",), "LBSC": ("s",), "CULA": ("s",)}
+SMALL_VARIANTS = {"SJCU": ("s", "m"), "CULA": ("s", "m"), "ICU": ("s", "m"), "PPCU": ("s", "m"), "PRIN": ("s", "m"), "CUSD": ("s", "m"), "LBSC": ("s", "m"), "NANA": ("s", "m"), "CCSB": ("s", "m"), "HVRD": ("s", "m"), "UPAC": ("s", "m"), "CRBU": ("s", "m"), "UCDS": ("s", "m"), "CSFU": ("s", "m"), "USAF": ("s", "m"), "SCCU": ("s", "m"), "GWU": ("s", "m"), "STAM": ("s", "m"), "CUSC": ("s", "m"), "BUCK": ("s", "m"), "HURST": ("s", "m"), "LIUB": ("s", "m"), "IONA": ("s", "m"), "MSMU": ("s", "m"), "WAGN": ("s", "m")}
 ## Logos whose own outer edge is too dark for the navy panels get a one-pixel outline in their own
 ## trim colour around them, at every size (the logo is made 2 px smaller first, so it still fits
 ## its box): Emmitsburg's navy EH disappeared into the background (2026-10-30, the user's call).
-OUTLINES = {"MSMU": (253, 253, 253)}
+OUTLINES = {}   # (Emmitsburg's outline went with its EH: its Highlander has its own, 2026-11-08)
 
 def outlined(make, bw, bh, col):
     """`make(w, h)`'s image two pixels smaller, ringed in `col` (corners too)."""
@@ -35,7 +35,23 @@ def outlined(make, bw, bh, col):
     a[ring, :3] = col
     a[ring, 3] = 255
     return Image.fromarray(a, "RGBA")
-RING_HINTS = {"CCSB": (252, 185, 16)}
+RING_HINTS = {"ICU": (252, 209, 82), "PPCU": (255, 128, 16), "PRIN": (252, 97, 1)}
+## Logos supplied directly as a full-resolution original (already in source/) rather than cut from
+## the PDF: built from that file, which is never overwritten. Irvine's aardvark head replaced the
+## sheet's gold "A" (2026-11-08); its small sizes ring the body in its own cream border. Malibu's
+## breaking wave replaced the sheet's orange "B" (2026-11-08); its list sizes are the wave alone
+## (MAIN_ONLY: the spray turns to noise there) ringed in its orange. New Jersey's pixel-art Bengal
+## tiger head replaced the sheet's striped "B" (2026-11-08; its fringe cleared and its colours
+## snapped to its own black, orange and cream first); its list sizes ring it in that orange.
+## The Bears' LA monogram, the Golden Grizzlies' bear over BV, the Redwoods' tree over PG, the
+## Spartans' helmet over LAS and twenty-one pixel-art mascots replaced their sheet logos too (2026-11-08;
+## the untouched files are in originals/, the backdrop or glow around each cut away in source/).
+## Their list sizes ring the body in its own outline, except four whose ring would take the wrong
+## colour (Bronx, Los Angeles Mountain Lions, Moraga, Providence): faithful at every size.
+## Lewisburg's pixel-art buffalo head replaced the sheet's orange-and-navy "LB" (2026-11-08; the
+## untouched file is originals/lewisburg_buffalo.png, its translucent white haze cut away in
+## source/BUCK.png); its list sizes ring the head in its own white border.
+SUPPLIED = {"ICU", "PPCU", "PRIN", "CULA", "HURST", "LIUB", "IONA", "MSMU", "WAGN", "ALC", "STAM", "CUSC", "CUSD", "LBSC", "FORDU", "NANA", "CCSB", "HVRD", "UPAC", "LMMU", "CRBU", "UCDS", "SMCC", "CSFU", "USAF", "SCCU", "GWU", "BROW", "BUCK"}
 PANEL = np.array([11, 23, 66])
 K = 4
 raw, pages, out, src_dir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
@@ -133,14 +149,18 @@ for tid, it in zip(IDS, items):
     n = it[0]; iw, ih = map(int, it[1].split("x"))
     page = int(re.match(r"p(\d+)_", n).group(1))
     x, y, w, h = [int(v.split("=")[1]) for v in it[5:9]]
-    img = Image.open(f"{raw}/{n}.png").convert("RGB")
-    img = img.crop(visible(page, x, y, w, h, iw, ih))
-    flat, P, rgba = clean(img)
-    Image.fromarray(rgba, "RGBA").save(f"{src_dir}/{tid}.png")
+    if tid in SUPPLIED:
+        flat, P = fine.flatten(f"{src_dir}/{tid}.png")
+    else:
+        img = Image.open(f"{raw}/{n}.png").convert("RGB")
+        img = img.crop(visible(page, x, y, w, h, iw, ih))
+        flat, P, rgba = clean(img)
+        Image.fromarray(rgba, "RGBA").save(f"{src_dir}/{tid}.png")
     kinds = []
     for tag, bw, bh in BOXES:
         variant = tag in SMALL_VARIANTS.get(tid, ())
-        make = (lambda w2, h2, tid=tid: small.small(flat, P, w2, h2, RING_HINTS.get(tid))) if variant else (lambda w2, h2: sample(flat, P, w2, h2))
+        body = small.main_piece(flat) if tid in small.MAIN_ONLY else flat
+        make = (lambda w2, h2, tid=tid, body=body: small.small(body, P, w2, h2, RING_HINTS.get(tid))) if variant else (lambda w2, h2: sample(flat, P, w2, h2))
         kind = "small variant" if variant else "faithful"
         if tid in OUTLINES:
             im = outlined(make, bw, bh, OUTLINES[tid])

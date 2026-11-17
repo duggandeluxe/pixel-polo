@@ -33,7 +33,7 @@ var event_no := 0
 ## The difficulty (Difficulty, 0 EASY .. 0.5 MEDIUM .. 1 HARD): their AI's, fixed for the match
 ## (DYNAMIC included: it only moves between games). Their defence and keeper on your attack,
 ## their offence on theirs; your own AI defenders always play at Difficulty.TEAMMATES.
-var level := Difficulty.MEDIUM
+var level := Difficulty.BASELINE
 var gk_memory := Vector3.ZERO       # where your shots have gone today, as their keeper has seen them (KeeperAI)
 var home := true                     # you're the home team (your keeper gets the home dive)
 var duel: KeeperDuel = null          # their shot, with you in goal
@@ -47,6 +47,13 @@ var opp_think := 0.0
 var opp_pressed := false
 var opp_rng := RandomNumberGenerator.new()
 var opp_ai := OffenseAI.new()       # ...and what it's thinking (OffenseAI: one per possession)
+var their_shots: Array = []          # where their attack's last few shots came from (OffenseAI.history: not the same shot every time)
+var our_shots: Array = []            # ...and yours, in SIM, when the same brain runs your attack
+var brain_level := Difficulty.BASELINE   # ...and the level it plays at (theirs: `level`; yours in SIM: TEAMMATES)
+## SIM (MatchScreen's live simulation): your attack is played by that same brain, timed the same
+## way (_tick_opp), at your teammates' level, and your defence calls your gameplan's drop the way
+## theirs calls theirs (DropCall). Nothing else changes: the same rules, the same players.
+var sim_us := false
 ## Tests and autoplay: the bot plays your keeper (auto_keeper 0..1; below 0, you do). Your
 ## field defenders are always the AI's.
 var auto_keeper := -1.0
@@ -85,7 +92,7 @@ var adjusted := false                # the halftime decision is made: locked for
 var goal_spots := [{"centre": 0, "perimeter": 0, "other": 0}, {"centre": 0, "perimeter": 0, "other": 0}]
 var half_stats := {}                 # their first half, frozen at the end of Q2 (opp_stats)
 
-func _init(p_us: PoloTeam, p_them: PoloTeam, seed_value: int, minutes: float, p_level: float = Difficulty.MEDIUM) -> void:
+func _init(p_us: PoloTeam, p_them: PoloTeam, seed_value: int, minutes: float, p_level: float = Difficulty.BASELINE) -> void:
 	us = p_us
 	them = p_them
 	rng = RandomNumberGenerator.new()
@@ -101,18 +108,40 @@ func _init(p_us: PoloTeam, p_them: PoloTeam, seed_value: int, minutes: float, p_
 # ------------------------------------------------------------------ sprint
 ## Their sprinter's speed in m/s; the screen races your taps against it.
 func their_sprint_speed() -> float:
+	return sprint_speed_of(them, rng)
+
+## A team's sprinter's speed in m/s when the computer swims it (their sprinter; yours in SIM):
+## its fastest starter, rolled with `r`.
+static func sprint_speed_of(team: PoloTeam, r: RandomNumberGenerator) -> float:
 	var best: PoloPlayer = null
-	for p: PoloPlayer in them.starters().slice(1):
+	for p: PoloPlayer in team.starters().slice(1):
 		if best == null or p.speed > best.speed:
 			best = p
 	var jet := Sprint.JET_BONUS if Traits.has(best, "jet") else 0.0
-	return (lerpf(2.4, 3.2, best.speed / 100.0) + jet) * rng.randf_range(0.95, 1.05)
+	return (lerpf(2.4, 3.2, best.speed / 100.0) + jet) * r.randf_range(0.95, 1.05)
 
 func sprint_done(we_won: bool) -> void:
+	var mu := carry_man_up
+	carry_man_up = {}
 	if we_won:
 		_start_attack(Play.Kind.HALF_COURT)
 	else:
 		_start_defense(Play.Kind.HALF_COURT)
+	# the 6 on 5 the last period ended in: only if the team that had it wins the sprint
+	if not mu.is_empty() and int(mu.side) == (0 if we_won else 1) and play != null:
+		play.open_man_up(float(mu.secs), mu.who)
+
+## A 6 on 5 still running when the period ended (not ended by a goal): {side (0 yours, 1 theirs:
+## who was a man up), secs left, who (the excluded man)}. Empty: none. Used by the next sprint.
+var carry_man_up := {}
+
+## The possession that ended the period: a 6 on 5 it was still in carries over to the sprint.
+func _note_carry(side: int, outcome: String) -> void:
+	carry_man_up = {}
+	if play == null or play.kind == Play.Kind.PENALTY or state.in_shootout or outcome == "goal":
+		return
+	if play.man_up > 0.0 and play.excl_player != null:
+		carry_man_up = {"side": side, "secs": play.man_up, "who": play.excl_player}
 
 # ------------------------------------------------------------------ attack
 ## `snap`: where everybody was when we won the ball (Play.snapshot), for a counter.
@@ -124,11 +153,51 @@ func _start_attack(kind: int, snap: Dictionary = {}) -> void:
 	play.home_keeper = not home
 	play.set_level(level)                 # their defence and keeper
 	play.cpu_level = level
+	play.cs_k = Difficulty.catch_shoot_k(level)   # your catch-and-shoot window against the CPU
 	play.gk_memory = gk_memory
 	if play.kind != Play.Kind.PENALTY:
 		play.ai_drop = their_drop   # their defence: PRESS, and this drop once your centre has position (DropCall)
 		play.pf = state.pf
+	if sim_us:
+		_reset_brain(Difficulty.TEAMMATES)
+		opp_ai.history = our_shots
 	phase = Phase.ATTACK
+
+## SIM on or off (MatchScreen), from wherever the match is: the possession on the water carries on
+## as it is, only who decides for your side changes.
+func set_sim(on: bool) -> void:
+	if on == sim_us:
+		return
+	sim_us = on
+	if play == null or play.over:
+		return
+	if phase == Phase.ATTACK:
+		if on:
+			_reset_brain(Difficulty.TEAMMATES)
+			opp_ai.history = our_shots
+		elif not opp_plan.is_empty():
+			opp_plan = {}            # (a throw the brain was winding up: yours to make now)
+			play.raise_ball(false)
+	elif phase == Phase.DEFENSE and play.defending and not play.formation_locked:
+		_sim_defense(play, on)
+
+## Your defence in SIM: PRESS, and your gameplan's drop once their centre has position, called as
+## the computer calls its own (DropCall). Off: the CALL DROP button's again.
+func _sim_defense(pl: Play, on: bool) -> void:
+	if pl.kind == Play.Kind.PENALTY:
+		return
+	pl.ai_drop = drop if on else -1
+	pl.pf = state.pf
+
+## A possession's brain from scratch (OffenseAI), playing at `lvl`.
+func _reset_brain(lvl: float) -> void:
+	opp_plan = {}
+	opp_holder = null
+	opp_hold = 0.0
+	opp_think = 0.0
+	opp_ai.reset()
+	opp_ai.iq = lvl
+	brain_level = lvl
 
 ## Your attack's possession over (attack_done, counted once): into their defence's first-half log.
 func _log_their_defense(outcome: String) -> void:
@@ -162,11 +231,11 @@ func _their_halftime() -> void:
 	events.append({"k": "their_halftime", "first": first, "drop": their_drop, "keep": their_half.keep,
 		"reason": their_half.reason})
 
-## Your pick on the formation bar: only while you're defending (their attack), once a possession,
-## and only PRESS or your gameplan's drop.
+## Your call on the formation bar (CALL DROP: your gameplan's drop): only while you're defending
+## (their attack) at even strength, once a possession, and only PRESS or your gameplan's drop.
 func select_formation(f: int) -> bool:
-	if phase != Phase.DEFENSE or play == null or play.over or not play.defending:
-		return false
+	if phase != Phase.DEFENSE or play == null or play.over or not play.defending or play.man_up > 0.0:
+		return false   # (a 6 on 5: its own defence, nothing to call)
 	if not f in user_formations():
 		return false
 	return play.select_formation(f)
@@ -264,6 +333,8 @@ func _possession_change(outcome: String) -> void:
 func tick_attack(dt: float) -> void:
 	if play == null:
 		return
+	if sim_us:
+		_tick_opp(dt)   # SIM: the brain plays your attack
 	var before := play.elapsed
 	play.step(dt)
 	_run_clock(play.elapsed - before)
@@ -401,6 +472,7 @@ func attack_done() -> void:
 			snap = play.snapshot()
 	_possession_change(outcome)
 	if state.quarter_over():
+		_note_carry(0, outcome)
 		_quarter_end()
 	else:
 		_start_defense(their_kind, snap)
@@ -425,12 +497,10 @@ func _start_defense(kind: int, snap: Dictionary = {}) -> void:
 	play.set_level(Difficulty.TEAMMATES)  # your defenders are yours: the same at every difficulty
 	play.cpu_level = level                # (their shots' pace: Difficulty.cpu_shot_speed)
 	play.remote_keeper = true            # a shot on target is yours to save (the duel)
-	opp_plan = {}
-	opp_holder = null
-	opp_hold = 0.0
-	opp_think = 0.0
-	opp_ai.reset()
-	opp_ai.iq = level
+	_reset_brain(level)
+	opp_ai.history = their_shots
+	if sim_us:
+		_sim_defense(play, true)
 	duel = null
 	track_y = Geo.GOAL_Y   # a new possession: he starts in the middle
 	keeper_anim = null
@@ -486,9 +556,13 @@ func _tick_opp(dt: float) -> void:
 	# he takes a look before he throws, unless the press is right on him or time's nearly up
 	var pressed := p.openness(p.holder) <= OPP_PRESSED_R
 	var clock := p.shot_clock if p.kind == Play.Kind.PENALTY else minf(p.shot_clock, state.clock)
+	# the period's last seconds (the game clock): no looking round, a look every frame or so (OffenseAI._final)
+	var quarter_left := INF if p.kind == Play.Kind.PENALTY else state.clock
+	var at_buzzer := quarter_left <= OffenseAI.FINAL
+	opp_ai.quarter_left = quarter_left
 	var pace := opp_tempo(p)
 	opp_ai.pace = pace
-	var hold := 0.5 if p.kind == Play.Kind.PENALTY else Difficulty.value("hold", level) * pace
+	var hold := 0.5 if p.kind == Play.Kind.PENALTY else Difficulty.value("hold", brain_level) * pace
 	if opp_ai.quick_shot(p):
 		hold = minf(hold, OPP_CATCH_SHOOT * pace)   # caught it with a look on: he lets fly
 	if opp_ai.exploit(p, opp_rng):
@@ -496,12 +570,14 @@ func _tick_opp(dt: float) -> void:
 	if p.holder.tag == "C" and DefenseFormation.center_time(p, p.holder) < OffenseAI.CENTER_HURRY:
 		hold = 0.0   # the dropper's coming: no looking round (OffenseAI.think: a shot, or out with it)
 		opp_think = minf(opp_think, OPP_REACT.x)
-	if opp_hold < hold and not pressed and clock > OffenseAI.DEADLINE:
+	if opp_hold < hold and not pressed and clock > OffenseAI.DEADLINE and not at_buzzer:
 		return
 	if pressed and not opp_pressed:
 		# the press has got to him: he looks to move it, some quicker than others
-		opp_think = minf(opp_think, opp_rng.randf_range(OPP_REACT.x, OPP_REACT.y) * pace - Difficulty.value("press_react", level))
+		opp_think = minf(opp_think, opp_rng.randf_range(OPP_REACT.x, OPP_REACT.y) * pace - Difficulty.value("press_react", brain_level))
 	opp_pressed = pressed
+	if at_buzzer:
+		opp_think = minf(opp_think, 0.0 if quarter_left <= OffenseAI.LAST_GASP else OffenseAI.FINAL_THINK)
 	opp_think -= dt
 	if opp_think > 0.0:
 		return
@@ -653,6 +729,7 @@ func defense_done() -> void:
 			snap = play.snapshot()
 	_possession_change(outcome)
 	if state.quarter_over():
+		_note_carry(1, outcome)
 		_quarter_end()
 	else:
 		_start_attack(next_kind, snap)

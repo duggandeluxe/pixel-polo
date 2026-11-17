@@ -119,9 +119,15 @@ static func block_reach(b, from: Vector2, along: float, speed: float, late: floa
 
 ## The shot's pace, m/s, fixed at the release: the pull (`power`), the shooter's own pace rating
 ## (`pace`: Attributes.shot_pace, his SHOOTING; Tempo), his trait (`mods`) and any contact on him (0..1).
-static func shot_speed(power: float, pace: float, mods: Dictionary = {}, contact: float = 0.0) -> float:
-	var speed := lerpf(9.0, 17.0, clampf(power, 0.2, 1.0)) * Tempo.shooter_shot(pace) * float(mods.get("speed", 1.0))
-	speed = minf(speed, Tempo.SHOT_MAX)
+## The shooter's share of a shot's spread (his wrist error), from his shooting rating `skill`
+## (0-100) read up to `top` (100; a DEV Recruit's Attributes.rating_top): 1.35 at 0 .. 0.75 at 100,
+## on at the same slope past it (0.63 at 120). Always above zero: never a shot that can't miss.
+static func skill_spread(skill: float, top: float = 100.0) -> float:
+	return lerpf(1.35, 0.75, clampf(skill / 100.0, 0.0, top / 100.0))
+
+static func shot_speed(power: float, pace: float, mods: Dictionary = {}, contact: float = 0.0, top: float = 100.0) -> float:
+	var speed := lerpf(9.0, 17.0, clampf(power, 0.2, 1.0)) * Tempo.shooter_shot(pace, top) * float(mods.get("speed", 1.0))
+	speed = Tempo.soft_shot(speed)
 	return speed * (1.0 - CONTACT_SLOW * clampf(contact, 0.0, 1.0))
 
 ## A raised arm (DefenseFormation.arm_zone: {i, hand, r, ready}) against a ball from `from` along
@@ -171,12 +177,13 @@ static func arm_contact(from: Vector2, dir: Vector2, speed: float, arm: Dictiona
 static func resolve(from: Vector2, aim_y: float, power: float, skill: float, pressure_d: float,
 		blockers: Array, keeper_y: float, keeper_skill: float,
 		rng: RandomNumberGenerator, penalty: bool = false, mods: Dictionary = {}, ctx: Dictionary = {}) -> Dictionary:
-	var s := clampf(skill / 100.0, 0.0, 1.0)
+	# (the shooter's rating read up to ctx.skill_top: 100, or a DEV Recruit's Attributes.rating_top)
+	var top := float(ctx.get("skill_top", 100.0))
 	var k := clampf(keeper_skill / 100.0, 0.0, 1.0)
 	power = clampf(power, 0.2, 1.0)
 	# the keeper picks his way first, from what he can see: before a single die that depends on the aim
 	var pick := keeper_pick(from, keeper_y, pressure_d, penalty, ctx, rng)
-	var cs := 0.0 if penalty else catch_shoot(float(ctx.get("catch_t", INF)))
+	var cs := 0.0 if penalty else catch_shoot(float(ctx.get("catch_t", INF)), float(ctx.get("cs_k", 1.0)))
 	var exact := bool(ctx.get("exact", false))
 	var cross := 0.0 if penalty else cross_cage(from, aim_y, keeper_y)
 	var aim := Vector2(Geo.GOAL_X, aim_y)
@@ -184,10 +191,10 @@ static func resolve(from: Vector2, aim_y: float, power: float, skill: float, pre
 	# its pace, fixed here at the release: the pull and the shooter's own SHOOTING (ctx.pace:
 	# Attributes.shot_pace; never his team's overall or form). Wherever it ends up (in,
 	# saved, blocked, wide) it flies there at this speed: flight = distance / speed.
-	var speed := shot_speed(power, float(ctx.get("pace", skill)), mods, float(ctx.get("contact", 0.0)))
+	var speed := shot_speed(power, float(ctx.get("pace", skill)), mods, float(ctx.get("contact", 0.0)), top)
 	# the CPU's shot at your goal: its difficulty's pace on top of everything above (Difficulty.cpu_shot_speed)
 	speed *= float(ctx.get("speed_k", 1.0))
-	var sigma := (0.05 + 0.04 * dist) * lerpf(1.35, 0.75, s) * float(mods.get("spread", 1.0)) * ACCURACY
+	var sigma := (0.05 + 0.04 * dist) * skill_spread(skill, top) * float(mods.get("spread", 1.0)) * ACCURACY
 	sigma *= lerpf(1.0, CATCH_SHOOT_AIM, cs)
 	# the pass that set it up: a good passer's ball arrives ready to shoot (PASSING)
 	var pass_edge := float(ctx.get("pass_mod", 0.0)) * cs
@@ -230,6 +237,7 @@ static func resolve(from: Vector2, aim_y: float, power: float, skill: float, pre
 		float(ctx.get("window", Attributes.WINDOW_AT_5)), bool(ctx.get("wall", false)), bool(ctx.get("home_keeper", false)))
 	if not ctx.has("dive_side"):
 		body["rise"] = KeeperAI.RISE   # (a drill's forced dive keeps the dive its lesson was made with)
+	body["quick"] = float(body.quick) * float(ctx.get("gk_dive", 1.0))   # (the CPU keeper's difficulty: HARD dives quicker)
 	var height := shot_height(rng)
 	if ctx.has("height"):
 		height = float(ctx.height)   # (tests: the same die, a set height)
@@ -374,7 +382,7 @@ static func resolve(from: Vector2, aim_y: float, power: float, skill: float, pre
 ## lean), ctx.dive_side forces one (tests).
 static func keeper_pick(from: Vector2, keeper_y: float, pressure_d: float, penalty: bool, ctx: Dictionary,
 		rng: RandomNumberGenerator) -> Dictionary:
-	var iq := float(ctx.get("iq", Difficulty.MEDIUM))
+	var iq := float(ctx.get("iq", Difficulty.BASELINE))
 	var info := {"from": from, "keeper_y": keeper_y, "pressure": pressure_d, "penalty": penalty,
 		"close": float(ctx.get("close", close_range(from))), "memory": ctx.get("memory", Vector3.ZERO)}
 	var w := KeeperAI.read(info, iq)
@@ -473,10 +481,11 @@ static func past_line(from: Vector2, cross_y: float, metres: float) -> Vector2:
 	return cross + dir.normalized() * metres
 
 ## The catch-and-shoot bonus, 0..1, for a shot `catch_t` seconds after the catch (INF: no catch).
-static func catch_shoot(catch_t: float) -> float:
-	if catch_t <= CATCH_SHOOT_WINDOW:
+## `k` scales the whole window, full bonus and fade alike (Difficulty.catch_shoot_k: Play.cs_k).
+static func catch_shoot(catch_t: float, k: float = 1.0) -> float:
+	if catch_t <= CATCH_SHOOT_WINDOW * k:
 		return 1.0
-	return clampf(1.0 - (catch_t - CATCH_SHOOT_WINDOW) / CATCH_SHOOT_FADE, 0.0, 1.0)
+	return clampf(1.0 - (catch_t - CATCH_SHOOT_WINDOW * k) / (CATCH_SHOOT_FADE * k), 0.0, 1.0)
 
 ## How much of a cross-cage shot this is, 0..1: from off to one side (a decent angle, not
 ## straight on nor from the corner), aimed across to the far post, more so the further across

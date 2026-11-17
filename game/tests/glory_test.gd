@@ -10,7 +10,6 @@ const DIR := "user://test_glory/"
 var r   # the test runner
 
 func run(runner) -> void:
-	load("res://src/ui/screens/new_career.gd").start_filter = Colleges.D1   # (the Road to Glory's thirty; --test divisions has the rest)
 	r = runner
 	print("road to glory")
 	Store.reset_for_tests()
@@ -222,10 +221,6 @@ func _logos() -> void:
 		var id := String(s.short)
 		for tag in TeamLogo.ART_BOXES:
 			var path := TeamLogo.ART_PATH % [id, tag]
-			if id == "STAM":
-				if ResourceLoader.exists(path):
-					bad.append(path)
-				continue
 			if not ResourceLoader.exists(path):
 				missing.append(path)
 				continue
@@ -241,11 +236,11 @@ func _logos() -> void:
 				bad.append(path)
 			if tag == "60":
 				seen[img.get_data()] = id
-	r.check(missing.is_empty(), "T42: every school but Stanford has its artwork at every size %s" % str(missing))
+	r.check(missing.is_empty(), "T42: every school has its artwork at every size %s" % str(missing))
 	r.check(bad.is_empty(), "T42: each fills its box without stretching, edges sharp (no half-transparent pixels) %s" % str(bad))
-	r.check(seen.size() == 29, "T42: 29 different logos, none shared (%d)" % seen.size())
+	r.check(seen.size() == 30, "T42: 30 different logos, none shared (%d)" % seen.size())
 	var stam := Colleges.school("STAM")
-	r.check(TeamLogo.art(stam, Vector2i(60, 60)) == null and TeamLogo.texture(stam) != null, "T42: Stanford Redwoods keeps its own logo")
+	r.check(TeamLogo.art(stam, Vector2i(60, 60)) != null, "T42: the Pacific Grove Redwoods draw their redwood-and-PG artwork")
 	var c := Career.new_game("HURST", "A", "B", 5)
 	var used := true
 	for id in ["CULA", "HURST", "SJCU"]:
@@ -259,7 +254,7 @@ func _logos() -> void:
 	r.check(colours, "T25: team colours untouched")
 	var uni: Array = Colleges.SCHOOLS.filter(func(s): return s.has("school") or "University" in String(s.name) or "College" in String(s.name)).map(func(s): return s.short)
 	r.check(uni.is_empty(), "T43: no university or college names kept %s" % str(uni))
-	r.check(Colleges.team_name("PRIN") == "Princeton Bengals" and Colleges.team_name("STAM") == "Stanford Redwoods" and Colleges.team_name("BROW") == "Providence Grizzlies", "T43: place names kept (Princeton, Stanford, Providence)")
+	r.check(Colleges.team_name("PRIN") == "New Jersey Bengals" and Colleges.team_name("STAM") == "Pacific Grove Redwoods" and Colleges.team_name("BROW") == "Providence Grizzlies", "T43: place names kept (New Jersey, Pacific Grove, Providence)")
 	var hired: Dictionary = c.queue.filter(func(q): return String(q.get("title", "")).begins_with("WELCOME"))[0] if c.queue.any(func(q): return String(q.get("title", "")).begins_with("WELCOME")) else {}
 	r.check(String(hired.get("text", "")).begins_with("The Erie Lakehawks have hired you"), "T43: the welcome names the team, not a university")
 
@@ -722,9 +717,9 @@ func _migration() -> void:
 	r.check(q3.unlocked.size() == 5 and q3.done.is_empty(), "T28: a broken profile still loads as a new one")
 	# no credits involved anywhere
 	var src := FileAccess.get_file_as_string("res://src/core/progression.gd") + FileAccess.get_file_as_string("res://src/ui/screens/new_career.gd")
-	# (the store ties are the ALL 30 TEAMS purchase, all_teams_test, and the packs, --test divisions)
+	# (the store ties are the ALL 30 TEAMS purchase: all_teams_test)
 	var store_uses := RegEx.create_from_string("Store\\.(\\w+)").search_all(src).map(func(m): return m.get_string(1))
-	r.check(not src.contains("spend_credits") and not src.contains("vault") and store_uses.all(func(u): return u in ["all_teams", "owns", "TEAMS_ID", "price", "state_changed", "division_owned"]), "T22: no credit or vault unlocks; the store only for ALL 30 TEAMS %s" % str(store_uses))
+	r.check(not src.contains("spend_credits") and not src.contains("vault") and store_uses.all(func(u): return u in ["all_teams", "owns", "TEAMS_ID", "price", "state_changed"]), "T22: no credit or vault unlocks; the store only for ALL 30 TEAMS %s" % str(store_uses))
 
 # ------------------------------------------------------------------ shots
 static func shots(runner, out: String) -> void:

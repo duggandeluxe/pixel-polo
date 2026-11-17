@@ -123,9 +123,9 @@ func _game_rewards() -> void:
 	var lines := CreditRewards.pay_game(c, g, rd, _ranks(c, 5, 12))
 	var again := CreditRewards.pay_game(c, g, rd, _ranks(c, 5, 12))
 	r.check(c.credits == before + _sum(lines) and again.is_empty(), "12: a game pays once")
-	# a playoff game pays per-game nothing (the achievements pay the playoffs)
+	# a playoff win pays the win alone, no bonuses (the achievements pay the rest)
 	var po := {"kind": "nat_sf", "games": []}
-	r.check(CreditRewards.game_lines(c, g, po, _ranks(c, 5, 1)).is_empty(), "the per-game rewards are the regular season's")
+	r.check(_sum(CreditRewards.game_lines(c, g, po, _ranks(c, 5, 1))) == 3, "a playoff win: +3, no bonuses (not even a shutout over the No. 1)")
 
 # ------------------------------------------------------------------ 9-10: achievements
 func _achievements() -> void:
@@ -284,7 +284,7 @@ func _prices() -> void:
 		if not by.has(p.stars):
 			by[p.stars] = []
 		by[p.stars].append(int(x.price))
-	r.check(lo >= 8 and hi <= 99, "17: every price 8-99 (%d-%d)" % [lo, hi])
+	r.check(lo >= 10 and hi <= 110, "17: every price 10-110 (%d-%d)" % [lo, hi])
 	r.check(formula, "18: the saved price is the formula's")
 	var keys := by.keys()
 	keys.sort()
@@ -313,9 +313,85 @@ func _prices() -> void:
 		up.attrs[kk] = minf(9.0, float(up.attrs[kk]) + 1.0)
 		up.attr_pot[kk] = maxf(float(up.attr_pot[kk]), float(up.attrs[kk]) + float(p.attr_pot[kk]) - float(p.attrs[kk]))
 	Attributes.sync(up)
-	r.check(up.stars != p.stars or Recruiting.price_of(up) > base, "18: better attributes cost more (%d > %d)" % [Recruiting.price_of(up), base])
+	r.check(up.stars != p.stars or Recruiting.price_of(up) >= base, "18: better attributes never cost less (%d >= %d)" % [Recruiting.price_of(up), base])
+	# the high-potential premium: 4.5 +2%, 5 +4% (4 none), rounded up to the coin
+	r.check(Recruiting.pot_premium(20, 3.5) == 20 and Recruiting.pot_premium(20, 4.0) == 20 and Recruiting.pot_premium(40, 4.0) == 40
+		and Recruiting.pot_premium(20, 4.5) == 21 and Recruiting.pot_premium(50, 4.5) == 51 and Recruiting.pot_premium(20, 5.0) == 21
+		and Recruiting.pot_premium(25, 5.0) == 26 and Recruiting.pot_premium(99, 5.0) == 103, "potential premium: 4.5 +2% / 5 +4% / 4 none, rounded up")
+	var five := Recruiting.make(c.rng, 2.0, 5.0, "high", {}, PoloPlayer.Pos.DRIVER)
+	var raw := PoloPlayer.from_dict(five.to_dict())
+	raw.pot_stars = 3.0
+	r.check(Recruiting.price_of(five) > Recruiting.price_of(raw), "potential: a five-star potential costs more than the same man at 3-star potential (%d > %d)" % [Recruiting.price_of(five), Recruiting.price_of(raw)])
 	# no 25% cut anywhere
-	r.check(Recruiting.REFRESH_COSTS == [0, 3, 5, 8, 10] and Recruiting.PRICE_MIN == 8 and Recruiting.PRICE_MAX == 99, "19: refresh costs and the price range as specified")
+	r.check(Recruiting.REFRESH_COSTS == [0, 3, 5, 8, 10] and Recruiting.PRICE_MIN == 10 and Recruiting.PRICE_MAX == 110 and Recruiting.ORDINARY_MAX == 110, "19: refresh costs and the price range as specified")
+	# the Recruiting Price Rebalance: the formula's coefficients, DEV Recruits outside the cap
+	r.check(Recruiting.PRICE_ZERO == 5.0 and Recruiting.PRICE_LIN == 3.0 and Recruiting.PRICE_SQ == 5.5 and Recruiting.PRICE_ATTR == 0.15 and Recruiting.PRICE_POT == 0.4 and Recruiting.PRICE_CUR_W == 0.2,
+		"potential-led: 5 + 3(W - 1.5) + 5.5(W - 1.5)^2 with W 80% potential, 0.15 an attribute point, 0.4 a point of room")
+	# potential outweighs current skill: a capped 3-star costs less than a 2-star with 4.5-star potential
+	var capped := Recruiting.make(c.rng, 3.0, 3.0, "normal", {}, PoloPlayer.Pos.DRIVER)
+	var riser := Recruiting.make(c.rng, 2.0, 4.5, "high", {}, PoloPlayer.Pos.DRIVER)
+	r.check(Recruiting.price_of(riser) > Recruiting.price_of(capped) + 20, "potential-led: 2* / 4.5* potential (%d) well over a capped 3* (%d)" % [Recruiting.price_of(riser), Recruiting.price_of(capped)])
+	r.check(DevRecruits.PRICE == 200 and DevRecruits.PRICE > Recruiting.ORDINARY_MAX and Recruiting.price_of(DevRecruits.make("blake", 5)) == 200, "rebalance: a DEV Recruit is 200 PP, past the 110 cap")
+	_price_report(c)
+
+## The Recruiting Price Rebalance's report: a large market sample (the real new_recruit), its
+## prices against the formula before the rebalance (_old_price, the same players). Prints only,
+## besides the cap holding: the targets by stars are a balance aim, not a rule.
+const REPORT_N := 20000
+func _price_report(c: Career) -> void:
+	var now: Array = []
+	var was: Array = []
+	var by := {}
+	for i in REPORT_N:
+		var x := Recruiting.new_recruit(c)
+		var p: PoloPlayer = x.p
+		now.append(int(x.price))
+		was.append(_old_price(p))
+		if not by.has(p.stars):
+			by[p.stars] = [[], []]
+		by[p.stars][0].append(int(x.price))
+		by[p.stars][1].append(_old_price(p))
+	print("  PRICE REPORT (%d market prospects)        NEW            OLD" % REPORT_N)
+	var line := func(label: String, f: Callable): print("    %-34s %-14s %s" % [label, f.call(now), f.call(was)])
+	line.call("average", func(a): return "%.1f" % _mean(a))
+	line.call("median", func(a): return str(_median(a)))
+	line.call("min - max", func(a): return "%d - %d" % [a.min(), a.max()])
+	print("    %-34s %-14s %s" % ["at the cap (110 new / 80 old)", "%.2f%%" % _pct(now, func(v): return v >= 110), "%.2f%%" % _pct(was, func(v): return v >= 80)])
+	line.call("over 60 PP", func(a): return "%.1f%%" % _pct(a, func(v): return v > 60))
+	line.call("over 90 PP", func(a): return "%.1f%%" % _pct(a, func(v): return v > 90))
+	var keys := by.keys()
+	keys.sort()
+	print("    by stars        n      NEW avg  range   median   OLD avg  range")
+	for k in keys:
+		var a: Array = by[k][0]
+		var o: Array = by[k][1]
+		print("    %.1f*  %8d   %8.1f  %3d-%-3d  %4d    %8.1f  %3d-%-3d" % [k, a.size(), _mean(a), a.min(), a.max(), _median(a), _mean(o), o.min(), o.max()])
+	r.check(now.max() <= Recruiting.ORDINARY_MAX and now.min() >= Recruiting.PRICE_MIN, "rebalance: %d prospects all 10-110 (%d-%d)" % [REPORT_N, now.min(), now.max()])
+
+## The formula before the Recruiting Price Rebalance (for the report's comparison only).
+static func _old_price(p: PoloPlayer) -> int:
+	var s := p.stars - 1.5
+	var a := 0.0
+	var u := 0.0
+	for k in Attributes.keys_for(p):
+		a += Attributes.value(p, k)
+		u += maxf(0.0, Attributes.ceiling(p, k) - Attributes.value(p, k))
+	var total := 2.0 + 3.0 * s + 6.0 * s * s + roundi(0.4 * a) + roundi(0.65 * u) + int(Recruiting.POS_PRICE.get(p.pos, 0))
+	return mini(Recruiting.pot_premium(clampi(roundi(total), 8, 99), p.pot_stars), 80)
+
+static func _mean(a: Array) -> float:
+	var t := 0.0
+	for v in a:
+		t += float(v)
+	return t / maxf(1.0, a.size())
+
+static func _median(a: Array) -> int:
+	var b := a.duplicate()
+	b.sort()
+	return int(b[b.size() / 2])
+
+static func _pct(a: Array, f: Callable) -> float:
+	return 100.0 * a.filter(f).size() / maxf(1.0, a.size())
 
 # ------------------------------------------------------------------ 21-22: signing
 func _signing() -> void:
@@ -550,9 +626,10 @@ func _screens() -> void:
 	await _frames(3)
 	var proj: Node = Game.current_screen.find_child("Projection", true, false)
 	r.check(proj != null and int(proj.get_meta("over")) == Recruiting.over_by(c), "25: the projection's warning is live")
-	# the Golden Credits coin
-	r.check(ResourceLoader.exists(CreditCoin.SOURCE) and ResourceLoader.exists("%scredit_coin_16.png" % CreditCoin.DIR), "coin 1: the official coin art is in the project (tools/make_credit_coin.py)")
-	r.check(CreditCoin.texture(16).get_height() >= 16, "coin 6: the coin at 16 px at least beside an amount (%d)" % CreditCoin.texture(16).get_height())
+	# the Polo Points coin: the gold P coin, crisp at 1x and 2x
+	var pc := CreditCoin.image(1)
+	r.check(pc.get_width() == 10 and pc.get_height() == 10 and pc.get_pixel(3, 3).is_equal_approx(Color(CreditCoin.P_COLORS.P)) and pc.get_pixel(0, 0).a == 0.0, "coin 1: the Polo Points coin: 10 px, a P in the middle, clear corners")
+	r.check(CreditCoin.texture(16).get_height() == 10 and CreditCoin.texture(20).get_height() == 20, "coin 6: 10 px beside an amount, 2x from 20 px (%d)" % CreditCoin.texture(16).get_height())
 	var old_ids: Array = c.market.map(func(m): return (m.p as PoloPlayer).id)
 	Recruiting.refresh(c)
 	Game.goto("recruiting", {"tab": "MARKET"})
@@ -589,7 +666,7 @@ static func shots(runner, out: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	var tree: SceneTree = runner.get_tree()
 	Store.reset_for_tests()
-	Store.mark_starter_offered()   # (no starter-pack pop-up over the shots)
+	Store.starter_offered = true   # (no starter-pack pop-up over the shots)
 	var c := Career.new_game("CULA", "Sam", "Rivera", 31)
 	c.queue.clear()
 	c.hot_tip = true
@@ -613,6 +690,13 @@ static func shots(runner, out: String) -> void:
 			ch.queue_free()
 	Game.goto("recruiting", {"tab": "INCOMING"})
 	await save.call("ce_incoming")
+	c.credits = 2000   # (over the roster cap: the projection's warning must still fit the page)
+	for r in c.market.duplicate():
+		if Recruiting.over_by(c) > 0:
+			break
+		Recruiting.sign(c, r)
+	Game.goto("recruiting", {"tab": "MARKET"})
+	await save.call("ce_market_over")
 	Game.goto("coaching")
 	await save.call("ce_coaching")
 	# a game's credits

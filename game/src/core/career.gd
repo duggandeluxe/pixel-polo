@@ -3,7 +3,7 @@ extends RefCounted
 ## A college coaching career: your program, the 30-school world, the season and its money.
 ## Pure data + rules; screens read and call it, Game saves it after every week.
 
-const SAVE_VERSION := 10   # 10: active divisions (the Division II & III expansion); 9: every program's three-man bench (the roll-out); 2: player traits; 3: 8-man rosters; 4: team OVR, several games a week; 5: 18-man programs, the recruiting year; 6: OFF/DEF ratings locked for the season, the Top 20 poll, the scoring engine; 7: seven-man rosters, player stars and HOT/COLD form; 8: XP development, injuries as attribute penalties
+const SAVE_VERSION := 10   # 10: (a retired field); 9: every program's three-man bench (the roll-out); 2: player traits; 3: 8-man rosters; 4: team OVR, several games a week; 5: 18-man programs, the recruiting year; 6: OFF/DEF ratings locked for the season, the Top 20 poll, the scoring engine; 7: seven-man rosters, player stars and HOT/COLD form; 8: XP development, injuries as attribute penalties
 const START_YEAR := 2026
 ## Every program carries seven players across four class years: one goalkeeper and six field
 ## players, and all seven play every game ("Player Stars & 7-Player Rosters"). Older saves'
@@ -13,7 +13,8 @@ const ROSTER_MAX := 7
 const FIELD_MAX := 6
 ## Every program (yours and the AI's, since the Exclusions & Roll-Out update) carries this many
 ## more on its bench: the substitutes a rolled player is replaced by (PoloTeam.starters), places
-## it may recruit into, never filled with walk-ons. A backup keeper can be one of them.
+## it may recruit into; any still empty when a season starts are filled with walk-ons
+## (WalkOns). A backup keeper can be one of them.
 const BENCH_MAX := 3
 ## Scholarships: funded places on the seven-man roster (not offers a year). A program has this
 ## many at once; the rest of the roster are walk-ons. A senior's frees up when he graduates.
@@ -26,7 +27,7 @@ const FAC := {
 	"weights": {"name": "Weight Room", "desc": "Program prestige. Players now develop through their own XP.", "cost": [0, 70, 140, 240, 380]},
 	"medical": {"name": "Sports Medicine", "desc": "Fewer training injuries (12% less risk per level).", "cost": [0, 70, 140, 240, 380]},
 	"video": {"name": "Video Room", "desc": "Program prestige. Players now develop through their own XP.", "cost": [0, 70, 140, 240, 380]},
-	"recruit": {"name": "Recruiting Department", "desc": "Program prestige. Recruits are signed with credits on the market.", "cost": [0, 60, 120, 210, 340]},
+	"recruit": {"name": "Recruiting Department", "desc": "Program prestige. Recruits are signed with Polo Points on the market.", "cost": [0, 60, 120, 210, 340]},
 }
 const FAC_ORDER := ["pool", "weights", "medical", "video", "recruit"]
 const FAC_MAX := 5
@@ -34,7 +35,7 @@ const STAFF := {
 	"offense": {"name": "Offensive Coordinator", "desc": "Program prestige. Players now develop through their own XP.", "cost": [60, 150, 300]},
 	"defense": {"name": "Defensive Coordinator", "desc": "Program prestige. Players now develop through their own XP.", "cost": [60, 150, 300]},
 	"goalie": {"name": "Goalkeeper Coach", "desc": "Program prestige. Players now develop through their own XP.", "cost": [60, 150, 300]},
-	"recruiter": {"name": "Recruiting Coordinator", "desc": "Program prestige. Recruits are signed with credits on the market.", "cost": [50, 120, 240]},
+	"recruiter": {"name": "Recruiting Coordinator", "desc": "Program prestige. Recruits are signed with Polo Points on the market.", "cost": [50, 120, 240]},
 }
 const STAFF_ORDER := ["offense", "defense", "goalie", "recruiter"]
 const STAFF_MAX := 3
@@ -42,9 +43,6 @@ const STAFF_MAX := 3
 ## How a playoff loss reads in the season review.
 const LOST_IN := {"conf_qf": "conference quarterfinal", "conf_semi": "conference semifinal", "conf_final": "conference final",
 	"nat_r1": "NCSA first round", "nat_qf": "NCSA quarterfinal", "nat_sf": "NCSA semifinal"}
-## How a Division III Championship game ends a season: [won, lost].
-const D3_FINISH := {"d3_sf": ["", "Lost in the NCSA Division III semifinal"], "d3_final": ["NCSA Division III champions", "NCSA Division III runners-up"],
-	"d3_third": ["NCSA Division III third place", "NCSA Division III fourth place"]}
 
 ## The tutorial a new career opens with (DrillScreen): started, then how it ended. It only ever
 ## launches from NEW CAREER, so nothing here brings it back when a career is loaded.
@@ -52,20 +50,19 @@ const TUTORIAL_PENDING := "pending"
 const TUTORIAL_SKIPPED := "skipped"
 const TUTORIAL_COMPLETED := "completed"
 
+## The season's states (Championship Elimination): still in it, knocked out of everything left
+## (the rest of the league still to play), between seasons.
+const STATE_ACTIVE := "ACTIVE"
+const STATE_ELIMINATED := "ELIMINATED"
+const STATE_OFFSEASON := "OFFSEASON"
+
 var rng := RandomNumberGenerator.new()
 var year := START_YEAR
 var week := 0
 var school := ""
 var coach := {"first": "", "last": "", "rep": 10, "wins": 0, "losses": 0, "titles": [], "seasons": 0}
 var teams := {}                 # id -> PoloTeam
-## THE DIVISIONS THIS DYNASTY PLAYS (Colleges.D1..D3). Only a division in here has teams, schedules,
-## standings, recruits or brackets in this save, whatever the player owns. A division waiting for
-## the next season's start is in div_pending; div_answers remembers what the NEW DIVISION
-## AVAILABLE! invitation was told ({"2": "add" | "no"}), so it's only ever asked once.
-var divisions: Array = [Colleges.D1]
 var sandbox := false            # a Developer Mode test career: never touches the player's profile (not saved)
-var div_pending: Array = []
-var div_answers := {}
 var credits := 0                # this dynasty's own YELLOW coins (earned / given in it: Wallet), saved with it
 var convertible := 0            # how many of `credits` were earned by playing (Wallet's exchange; never shown as a currency)
 var cv_earned := 0              # ...every such coin it has ever earned
@@ -83,7 +80,13 @@ var queue: Array = []           # things the hub shows next: {type, ...}
 var market: Array = []           # the RECRUITING MARKET's prospects (Recruiting): {p, price, sc, legacy}
 var incoming: Array = []         # your signed recruits: they join as freshmen after the season
 var refreshes := 0               # market refreshes this season (the first is free: Recruiting.REFRESH_COSTS)
+var auto_games := 0              # your games since the market's last free post-game roll (Recruiting.after_game)
+var new_recruits := false        # NEW RECRUITS AVAILABLE: a free roll not yet seen on the Recruiting screen
+var recruits_popped := false     # ...and the hub has played its pop-in for it (not saved: once a session)
+var dev_recruits := {}         # the DEV Recruits' spawn log and who's been signed (DevRecruits): {} none yet
 var recruit_warned := ""         # the season whose RECRUITING DEADLINE APPROACHING! was shown (once a season)
+var injury_seen := ""           # "year:week" when INJURY ACTIVE: ADJUST PRACTICE? was answered (Training opened): back next week if anyone's still hurt
+var hub_seen := false           # the Dynasty Hub has been opened from the home team card: its first-time hint is gone for good
 var cr_claims: Array = []        # every credit reward paid, by id (CreditRewards.claim): never twice
 var conf_awards: Array = []      # every conference weekly award ever given (ConfAwards), for good
 var award_players := {}          # pid -> his player as he was when he last won one, as JSON text (ConfAwards.player_of)
@@ -95,7 +98,18 @@ var national_done: Array = []    # the seasons whose NCSA honours are given (Nat
 var cut_pool: Array = []         # this off-season's cut players, for the other programs (Offseason): [{p, from}]
 var league_news: Array = []      # LEAGUE NEWS (LeagueNews): stories from the dynasty's own results, newest first
 var phase := "season"            # "season"; "done": the season's over, NEXT SEASON to come; "cuts": your roster is over its cap (Offseason)
-var hot_tip := false            # the roster's one-time HOT form tip has been shown (Roster.hot_tip)
+## CHAMPIONSHIP ELIMINATION: where your competitive season stands (STATE_*), saved. ELIMINATED:
+## out of every championship still to be played (the hub's SEASON OVER, SIM TO OFFSEASON).
+var season_state := STATE_ACTIVE
+## ...and how it ended for you ({} none this season): {year, season, kind, round, opp, us, them,
+## so, home, selected, shown (the OH NO! screen has been seen), simmed (SIM TO OFFSEASON ran)}
+var elim := {}
+## ...or how it was won: the NCSA final ({} none this season): {year, season, opp, us, them, so,
+## record, conf_title, shown (the CHAMPIONS! screen has been seen)}
+var champ := {}
+var hot_tip := false            # legacy: the roster's old one-time HOT tip (removed; HotTutorial covers it). Kept for saves.
+var hot_tutorial_seen := false  # the first-HOT-star tutorial (HotTutorial) is done or skipped in this dynasty, for good
+var hot_tutorial_pid := -1       # ...queued for it: the first of yours to earn a HOT star (-1: nobody yet)
 var tutorial := ""               # this career's opening tutorial: TUTORIAL_* ("": a career from before it)
 var gameplan: int = DefenseFormation.DEFAULT_DROP   # Coaching's PICK YOUR DEFENSE: the drop each match starts with (MatchFlow.set_gameplan)
 var rating_history: Array = []  # every season's starting ratings: {year, ratings: {id: [OVR, OFF, DEF]}}
@@ -137,6 +151,7 @@ var last_notes: Array = []
 var records := {"school": {}, "ncsa": {}}   # see Records
 var awards: Array = []          # every season's award winners: {year, award, name, team}
 var last_summary := {}          # the game summary screen's data (not saved)
+var last_dev := {}              # your roster's development either side of the last game's XP (dev_snapshot; not saved)
 var settled_box := ""           # the last played match settled (MatchState.uid): never twice
 var trimmed := false            # loading cut an old over-size roster down (not saved)
 var realigned := false          # an old save just moved onto the current conferences (not saved)
@@ -152,10 +167,10 @@ static func new_game(school_id: String, coach_first: String, coach_last: String,
 ## you pick a school (Game.dynasty_setup), so the picker's ratings are those very players. No
 ## school is yours yet: nothing here depends on which you'll pick, and the same seed always
 ## makes the same players. begin() turns it into your career without making them again.
-static func new_setup(seed_value: int, divs: Array = [Colleges.D1]) -> Career:
+static func new_setup(seed_value: int) -> Career:
 	var c := Career.new()
 	c.rng.seed = seed_value
-	c.difficulty = Difficulty.mode()
+	c.difficulty = Difficulty.new_career_mode()
 	for s in Colleges.SCHOOLS:
 		var t := PoloTeam.new()
 		t.id = s.short
@@ -174,101 +189,17 @@ static func new_setup(seed_value: int, divs: Array = [Colleges.D1]) -> Career:
 		CollegeGen.add_initial_bench(t, c.rng, c.new_id, float(s.ovr), BENCH_MAX, false)
 		for p in t.roster:
 			Development.ensure(p)   # hidden levels from the attributes they were made with
+			PlayerForm.reset(p)     # a new team starts with nobody hot: red stars are only earned in games
 		c.teams[t.id] = t
-	for d in [Colleges.D2, Colleges.D3]:
-		if d in divs:
-			c.add_division(d)
 	return c
-
-## One expansion school's program, generated by the same system as the thirty. Its dice are its own
-## (the career's seed and its id): the thirty's players and the career's own draws never depend on
-## which divisions are on, and the same career always makes the same players. Does nothing if
-## the school is already here, however often it's called.
-func add_school(s: Dictionary) -> void:
-	var id := String(s.short)
-	if teams.has(id):
-		return
-	var r := RandomNumberGenerator.new()
-	r.seed = hash([str(rng.seed), id, "expansion"])
-	var t := PoloTeam.new()
-	t.id = id
-	t.name = s.name
-	t.mascot = s.mascot
-	t.c1 = Color(s.c1)
-	t.c2 = Color(s.c2)
-	t.conf = s.conf
-	t.prestige = float(s.prestige)
-	t.pool = String(s.get("pool", Pools.DEFAULT_ID))
-	CollegeGen.make_expansion_roster(t, r, new_id, s, BENCH_MAX)
-	for p in t.roster:
-		Development.ensure(p)
-	teams[id] = t
-
-## Division `d`'s schools into this career, each exactly once (add_school). Idempotent.
-func add_division(d: int) -> void:
-	for s in Colleges.schools_of(d):
-		add_school(s)
-	if not d in divisions:
-		divisions.append(d)
-		divisions.sort()
-
-## Takes division `d`'s schools back out of a setup no season has started from (a new dynasty that
-## leaves a pack off): they were only there for the picker's cards.
-func _drop_division(d: int) -> void:
-	for s in Colleges.schools_of(d):
-		teams.erase(String(s.short))
-	divisions.erase(d)
-
-## THE NEW DIVISION AVAILABLE! invitations due: owned, not in this dynasty, not waiting, never
-## answered. (Ownership is the store's, passed in so this stays a rule about the save.)
-func division_invites(owned: Callable) -> Array:
-	return [Colleges.D2, Colleges.D3].filter(func(d): return Colleges.division_enabled(d) and bool(owned.call(d)) and not d in divisions and not d in div_pending and not div_answers.has(str(d)))
-
-## The answer to an invitation, kept in the save: ADD NEXT SEASON queues it (never mid-season).
-func answer_division(d: int, add: bool) -> void:
-	div_answers[str(d)] = "add" if add else "no"
-	if add:
-		queue_division(d)
-
-## Division `d` joins at the next season's start (Offseason.finish). Never at once.
-func queue_division(d: int) -> void:
-	if not d in divisions and not d in div_pending:
-		div_pending.append(d)
-		div_pending.sort()
-
-## The season boundary: everything queued joins, its schools made once. Run with no season on, just
-## before the next one is built, so a schedule and a table are made for them like anyone else.
-## A hibernated division (Colleges.ENABLE_LOWER_DIVISIONS) stays queued, untouched, and joins at
-## the first season's start after it's back.
-func activate_pending() -> Array:
-	var joined: Array = []
-	var waiting: Array = []
-	for d in div_pending:
-		if not Colleges.division_enabled(int(d)):
-			waiting.append(d)
-		elif not int(d) in divisions:
-			add_division(int(d))
-			joined.append(int(d))
-	div_pending = waiting
-	for d in joined:
-		var n := Colleges.schools_of(d).size()
-		add_news("%s JOINS THE NCSA: %d new programs this season" % [Colleges.division_name(d), n])
-		queue.append({"type": "info", "title": "%s IS HERE" % Colleges.division_name(d),
-			"text": "%d new programs join your dynasty this season, with their own schedules, standings, recruits and championships." % n})
-	return joined
 
 ## Your career from this setup, at `school_id`: the rosters stay exactly as they were made; your
 ## program just gets its three subs (CollegeGen.add_initial_bench: the starters, and so the
 ## ratings the picker showed, don't move). Then the first season. Call once, on a setup.
-func begin(school_id: String, coach_first: String, coach_last: String, divs: Array = [Colleges.D1]) -> Career:
+func begin(school_id: String, coach_first: String, coach_last: String) -> Career:
 	uid = new_uid()
-	# only the divisions this dynasty plays stay (your own school's always does)
-	for d in [Colleges.D2, Colleges.D3]:
-		if not d in divs and Colleges.division_of(school_id) != d:
-			_drop_division(d)
-		elif not d in divisions:
-			add_division(d)
-	difficulty = Difficulty.mode()   # (the mode picked on the New Career screen)
+	difficulty = Difficulty.new_career_mode()   # (DYNAMIC unless changed on the New Career screen)
+	Difficulty.reset_new_career()               # (the next new dynasty starts at DYNAMIC again)
 	school = school_id
 	coach.first = coach_first
 	coach.last = coach_last
@@ -313,12 +244,24 @@ func next_season_label() -> String:
 func calendar_text() -> String:
 	if phase == "season":
 		if week < schedule.size() and Schedule.is_playoff(schedule[week]):
-			var mine := my_game()
-			if mine.has("k"):
-				return String(Schedule.D3_SHORT.get(String(mine.k), "PLAYOFFS"))
 			return String(Schedule.SHORT_NAMES.get(String(schedule[week].kind), "PLAYOFFS"))
 		return "GAME %d/%d" % [mini(Schedule.games_played(schedule, school) + 1, Schedule.REGULAR_GAMES), Schedule.REGULAR_GAMES]
 	return "ROSTER CUTS" if phase == "cuts" else "SEASON OVER"
+
+## The season in full, for the Dynasty Hub's tracker: "2026-2027". (season_label stays the short
+## "2026-27": it's the key in saves, history and awards.)
+func season_years() -> String:
+	return "%d-%d" % [year, year + 1]
+
+## The week of the season for the Dynasty Hub's tracker: "WEEK 3". It's the calendar week (the
+## round `week` is on), so three games in one week are still one week; it starts at WEEK 1 each
+## season. Off-season, the phase instead ("ROSTER CUTS", "SEASON OVER").
+func week_text() -> String:
+	if is_eliminated():
+		return "SEASON OVER"
+	if phase == "season":
+		return "WEEK %d" % (clampi(week, 0, maxi(schedule.size() - 1, 0)) + 1)
+	return calendar_text()
 
 func in_offseason() -> bool:
 	return phase != "season"
@@ -343,8 +286,6 @@ func cur() -> Dictionary:
 func round_name(r: Dictionary = {}) -> String:
 	if r.is_empty():
 		r = cur()
-		if my_game().has("k"):
-			return Schedule.game_label(r, my_game())   # (a Division III Championship game, in an NCSA week)
 	return String(r.get("name", ""))
 
 ## Your games this week (up to three), in the order they're played.
@@ -478,6 +419,226 @@ func season_over_for_me() -> bool:
 		return false
 	return my_game().is_empty() and not Schedule.alive(season, cur(), school, team().conf)
 
+# ------------------------------------------------------------------ championship elimination
+## Out of every championship still to be played? Only once the NCSA field is drawn: a conference
+## tournament loss never ends a season by itself (an at-large bid can still come), so it's the
+## NCSA bracket that decides, either by leaving you out or by your loss in it. Read from the
+## schedule alone: the same answer however often it's asked.
+func knocked_out() -> bool:
+	if phase != "season" or week >= schedule.size():
+		return false
+	var r: Dictionary = cur()
+	if not String(r.kind).begins_with("nat_") or not Schedule.drawn(r):
+		return false
+	var mine := my_games(r)
+	if mine.any(func(g): return g.r == null):
+		return false   # (a game of yours still to play this round)
+	if not season.has("nat_slots"):
+		return mine.is_empty()   # (an older save's bracket: no game this round is being out)
+	return not Schedule.alive(season, r, school, team().conf)
+
+## The season is over for you but not for the league: the hub's SEASON OVER.
+func is_eliminated() -> bool:
+	return phase == "season" and season_state == STATE_ELIMINATED
+
+## The OH NO! YOUR SEASON IS OVER screen is still to be seen (once a season).
+func elim_pending() -> bool:
+	return not elim.is_empty() and int(elim.get("year", -1)) == year and not bool(elim.get("shown", false))
+
+## Keeps season_state with the schedule. `fresh`: a week just ended (an elimination found now gets
+## its OH NO! screen; one found on loading a save never replays it). A loss in the NCSA final
+## ends the season with no league left to play, so it's straight to the off-season, but it's
+## still an elimination for the OH NO! screen. Winning it never is.
+func update_season_state(fresh: bool = false) -> void:
+	if phase != "season":
+		if fresh and season_state == STATE_ACTIVE and elim.is_empty() and _lost_final():
+			_record_elimination(false)
+		elif fresh and season_state == STATE_ACTIVE and champ.is_empty() and String(season.get("champion", "")) == school:
+			_record_title()   # (won it: the CHAMPIONS! screen, once)
+		season_state = STATE_OFFSEASON
+		return
+	if knocked_out():
+		if season_state != STATE_ELIMINATED:
+			season_state = STATE_ELIMINATED
+			if elim.is_empty() or int(elim.get("year", -1)) != year:
+				_record_elimination(not fresh)
+			# (a decision riding on your next game has no next game now: settled as void)
+			CoachEvents.void_all(self, "YOUR SEASON IS OVER")
+	else:
+		season_state = STATE_ACTIVE
+
+func _lost_final() -> bool:
+	var last: Dictionary = schedule[schedule.size() - 1] if not schedule.is_empty() else {}
+	if last.is_empty() or String(last.get("kind", "")) != "nat_final":
+		return false
+	for g in last.games:
+		if g.r != null and Schedule.loser(g) == school:
+			return true
+	return false
+
+## The CHAMPIONS! screen is still to be seen (once, the season you win the NCSA).
+func champ_pending() -> bool:
+	return not champ.is_empty() and int(champ.get("year", -1)) == year and not bool(champ.get("shown", false))
+
+## The NCSA final you won, kept for the CHAMPIONS! screen.
+func _record_title() -> void:
+	var e := {"year": year, "season": season_label(), "shown": false, "record": record_text(),
+		"conf_title": school in (season.get("conf_champs", []) as Array)}
+	var lp := last_played()
+	if not lp.is_empty():
+		var g: Dictionary = lp[1]
+		var home: bool = g.h == school
+		var s: Array = g.r.s
+		e.merge({"opp": String(g.a if home else g.h), "us": int(s[0] if home else s[1]), "them": int(s[1] if home else s[0]),
+			"so": [] if (g.r.so as Array).is_empty() else ([int(g.r.so[0]), int(g.r.so[1])] if home else [int(g.r.so[1]), int(g.r.so[0])])})
+	champ = e
+
+## Your last game played this season: [round, game], or [] if there was none.
+func last_played() -> Array:
+	for w in range(mini(schedule.size() - 1, week), -1, -1):
+		var mine := my_games(schedule[w]).filter(func(g): return g.r != null)
+		if not mine.is_empty():
+			return [schedule[w], mine[mine.size() - 1]]
+	return []
+
+## How the season ended, kept for the OH NO! screen and the SEASON OVER hub.
+func _record_elimination(shown: bool) -> void:
+	var lp := last_played()
+	var e := {"year": year, "season": season_label(), "shown": shown, "simmed": false,
+		"selected": school in (season.get("nat_seeds", []) as Array)}
+	if not lp.is_empty():
+		var r: Dictionary = lp[0]
+		var g: Dictionary = lp[1]
+		var home: bool = g.h == school
+		var s: Array = g.r.s
+		e.merge({"kind": Schedule.game_kind(r, g), "game_round": Schedule.game_label(r, g), "opp": String(g.a if home else g.h), "home": home,
+			"us": int(s[0] if home else s[1]), "them": int(s[1] if home else s[0]), "won": Schedule.winner(g) == school,
+			"so": [] if (g.r.so as Array).is_empty() else ([int(g.r.so[0]), int(g.r.so[1])] if home else [int(g.r.so[1]), int(g.r.so[0])])})
+	# the round it ended in: the NCSA game you lost, or the selection that left you out
+	if bool(e.selected) and String(e.get("kind", "")).begins_with("nat_") and not bool(e.get("won", true)):
+		e["round"] = String(Schedule.ROUND_NAMES.get(String(e.kind), e.get("game_round", "")))
+	else:
+		e["round"] = "NOT SELECTED FOR THE NCSA CHAMPIONSHIP"
+	elim = e
+
+## SIM TO OFFSEASON: every week left, the whole league's games (none of yours: you have none), to
+## the NCSA final and on into the off-season (Offseason.begin: the awards, the review), at once.
+## Only while eliminated, so only once: the off-season it reaches ends the eliminated state.
+## True if it reached the off-season.
+func sim_to_offseason() -> bool:
+	if not is_eliminated() or bool(elim.get("simmed", false)):
+		return false
+	elim["simmed"] = true
+	var guard := schedule.size() + 2
+	while phase == "season" and guard > 0:
+		guard -= 1
+		sim_week_without_me()
+		end_week()
+	return phase != "season"
+
+# ------------------------------------------------------------------ automatic postseason advance
+## Out of this week's tournament round with no game of yours in it: knocked out of the conference
+## tournament (or not in it), left out of the NCSA field, or knocked out of the NCSA. Nothing for
+## you to play until the next tournament draws (or the season ends): advance_postseason sims it.
+## A bye while you're still in is never one (you're through to the next round: it waits for you).
+func advance_due() -> bool:
+	if phase != "season" or week >= schedule.size() or game_over:
+		return false
+	var r: Dictionary = cur()
+	if not Schedule.is_playoff(r) or not Schedule.drawn(r) or has_game():
+		return false
+	var key := "conf_slots" if String(r.kind).begins_with("conf_") else "nat_slots"
+	if not season.has(key):
+		return my_games(r).is_empty()   # (an older save's bracket: no game this round is being out)
+	return not Schedule.alive(season, r, school, team().conf)
+
+## THE AUTOMATIC POSTSEASON ADVANCE: every week with nothing for you in it, the league's games only,
+## through the normal week (sim_week_without_me + end_week: results, stats, awards, polls, training,
+## news, the NCSA draw, the off-season), at once. It stops at your next game (the NCSA field drawn
+## with you in it), or runs on through the NCSA final into the off-season. Then FELL JUST SHORT!
+## is noted if a conference tournament loss still got you into the NCSA. Never plays a game of
+## yours. True if anything changed.
+func advance_postseason() -> bool:
+	var moved := false
+	var guard := schedule.size() + 2
+	while guard > 0 and advance_due():
+		guard -= 1
+		sim_week_without_me()
+		end_week()
+		moved = true
+	if moved and not elim.is_empty() and int(elim.get("year", -1)) == year:
+		elim["simmed"] = true   # (the whole season's played: nothing left for SIM TO OFFSEASON)
+	return _note_fell_short() or moved
+
+## FELL JUST SHORT!: still to be seen (once a season).
+func fell_short_pending() -> bool:
+	var f: Dictionary = season.get("fell_short", {})
+	return not f.is_empty() and not bool(f.get("shown", false)) and phase == "season"
+
+## Lost in your conference tournament, selected for the NCSA all the same, no NCSA game of yours
+## played yet: FELL JUST SHORT! (kept in the season: once, saved).
+func _note_fell_short() -> bool:
+	if phase != "season" or season.has("fell_short") or week >= schedule.size():
+		return false
+	if not String(cur().kind).begins_with("nat_") or not school in (season.get("nat_seeds", []) as Array):
+		return false
+	var loss := {}
+	for w in range(0, week):
+		var r: Dictionary = schedule[w]
+		for g in my_games(r):
+			if g.r == null:
+				continue
+			var kind := Schedule.game_kind(r, g)
+			if kind.begins_with("nat_"):
+				return false   # (an NCSA game already played: too late for it)
+			if kind.begins_with("conf_") and Schedule.loser(g) == school:
+				var home: bool = g.h == school
+				var s: Array = g.r.s
+				loss = {"kind": kind, "round": String(Schedule.ROUND_NAMES.get(kind, Schedule.game_label(r, g))),
+					"opp": String(g.a if home else g.h), "us": int(s[0] if home else s[1]), "them": int(s[1] if home else s[0]),
+					"so": [] if (g.r.so as Array).is_empty() else ([int(g.r.so[0]), int(g.r.so[1])] if home else [int(g.r.so[1]), int(g.r.so[0])])}
+	if loss.is_empty():
+		return false   # (no conference tournament loss: the champions go on as ever)
+	loss.merge({"shown": false, "year": year, "season": season_label(), "record": record_text(),
+		"seed": Schedule.seed_of(season, "nat", school, ""), "at_large": school in (season.get("at_large", []) as Array)})
+	season["fell_short"] = loss
+	return true
+
+## CONTINUE TO NCSA TOURNAMENT: seen; then any NCSA bye of yours played through (the league's games,
+## the normal week), to your first NCSA game. The weeks it simmed.
+func continue_to_ncsa() -> int:
+	var f: Dictionary = season.get("fell_short", {})
+	if not f.is_empty():
+		f["shown"] = true
+	var n := 0
+	var guard := schedule.size() + 2
+	while guard > 0 and phase == "season" and week < schedule.size() and not game_over:
+		var r: Dictionary = cur()
+		if not String(r.kind).begins_with("nat_") or not Schedule.drawn(r) or has_game():
+			break
+		guard -= 1
+		sim_week_without_me()
+		end_week()
+		n += 1
+	advance_postseason()   # (never needed with a game to play; kept so nothing is ever left idle)
+	return n
+
+## What's left of the NCSA after you: {round (its name, "" when it's all decided), alive (team
+## ids still in), champion (once decided)}. Only results already played: nothing ahead is shown.
+func remaining_championship() -> Dictionary:
+	var out := {"round": "", "alive": [], "champion": ""}
+	if week >= schedule.size():
+		return out
+	var last: Dictionary = schedule[schedule.size() - 1]
+	for g in last.games:
+		if g.r != null:
+			out.champion = Schedule.winner(g)
+	var r: Dictionary = cur()
+	if String(r.kind).begins_with("nat_") and Schedule.drawn(r):
+		out.round = String(r.name)
+		out.alive = (season.get("nat_slots", []) as Array).filter(func(id): return String(id) != "")
+	return out
+
 # ------------------------------------------------------------------ money (Wallet)
 static var _uid_n := 0
 ## A dynasty id, made once (a career from before the Universal Coin Wallet gets one on load).
@@ -566,6 +727,9 @@ func start_season() -> void:
 	_snap_week()   # (everyone's stats were just emptied: the week starts at nothing)
 	schedule = Schedule.build(teams, rng)
 	phase = "season"
+	season_state = STATE_ACTIVE   # (the COACHING button and the weekly calendar are back)
+	elim = {}
+	champ = {}
 	Recruiting.start_season(self)   # a new market, the free refresh back
 	CreditRewards.prune(self)
 	var bonus := CreditRewards.season_start(self)   # +15, once a season
@@ -669,7 +833,8 @@ func finish_my_game(box: Dictionary) -> Dictionary:
 	var opp_t: PoloTeam = teams[g.a if home else g.h]
 	var xg := GameSim.pregame_expected(team(), opp_t, home, Schedule.is_neutral(g))
 	if box.has("lines"):
-		_grade(team(), opp_t, box.lines[0], box.lines[1], xg, "played")
+		_grade(team(), opp_t, box.lines[0], box.lines[1], xg, "played",
+			[box.get("assists", []), (box.get("them", {}) as Dictionary).get("lists", {}).get("a", [])])
 	# XP for everyone who played, from what the game recorded
 	var mine := Development.lines_of(box.get("played", []), {"g": box.get("goals", []), "a": box.get("assists", []),
 		"st": box.get("steals", []) + box.get("keeper_steals", []), "bl": box.get("blocks", []),
@@ -684,11 +849,25 @@ func finish_my_game(box: Dictionary) -> Dictionary:
 	elif box.has("lines"):
 		theirs = Development.lines_of(opp_t.starters(), {}, opp_t.keeper(), 0, int(us[0]), box.lines[1])
 	var xp := _award_game_xp(g, mine if home else theirs, theirs if home else mine)
+	if not xp.is_empty():
+		# each player's shots (goals among them) for the development sheet's S and %, on its own
+		# copy of the lines (the XP above never saw them): from every shot the match recorded, so a
+		# sub who came on has his too (box.lines only has the seven who finished)
+		var dl: Dictionary = last_dev.get("lines", {})
+		var shots: Array = box.get("shots", [])
+		for p in team().roster:
+			if not dl.has(p.id):
+				continue
+			if box.has("shots"):
+				dl[p.id]["sh"] = shots.count(p)
+			elif box.has("lines") and (box.lines[0] as Dictionary).has(p.id):
+				dl[p.id]["sh"] = int((box.lines[0][p.id] as Dictionary).get("sh", 0))
 	var scores := Moments.game_scores(box.get("goals", []), box.get("assists", []), box.get("keeper"), int(box.get("saves", 0)))
-	var broke := Records.game_breaks(self, school, box.get("goals", []), box.get("keeper"), int(box.get("saves", 0)), int(us[0]), int(us[1]))
+	var broke := Records.game_breaks(self, school, box.get("goals", []), box.get("keeper"), int(box.get("saves", 0)), int(us[0]), int(us[1]), String(g.a if home else g.h))
 	var marks: Array = broke.map(func(e): return String(e.line))
 	var out := _after_my_game(g, scores, not so.is_empty())
 	out["xp"] = xp
+	out["dev"] = last_dev if not xp.is_empty() else {}   # (the PLAYER DEVELOPMENT screen's before and after)
 	(out.lines as Array).append_array(xp_lines(xp))
 	(out.lines as Array).append_array(marks)
 	out["records"] = broke   # (the summary celebrates them: RecordShow)
@@ -739,10 +918,11 @@ func sim_my_game() -> Dictionary:
 	_record_sim_side(teams[g.a if side == 0 else g.h], res, 1 - side)   # (theirs too: the conference awards read every player)
 	var xp := _award_game_xp(g, _sim_lines(g, res, 0), _sim_lines(g, res, 1))
 	var scores := Moments.game_scores(res.goals[side], res.assists[side], team().keeper(), int(res.saves[side]))
-	var broke := Records.game_breaks(self, school, res.goals[side], team().keeper(), int(res.saves[side]), int(res.score[side]), int(res.score[1 - side]))
+	var broke := Records.game_breaks(self, school, res.goals[side], team().keeper(), int(res.saves[side]), int(res.score[side]), int(res.score[1 - side]), String(g.a if side == 0 else g.h))
 	var marks: Array = broke.map(func(e): return String(e.line))
 	var out := _after_my_game(g, scores, not (res.so as Array).is_empty())
 	out["xp"] = xp
+	out["dev"] = last_dev if not xp.is_empty() else {}   # (the PLAYER DEVELOPMENT screen's before and after)
 	(out.lines as Array).append_array(xp_lines(xp))
 	(out.lines as Array).append_array(marks)
 	out["records"] = broke   # (the summary celebrates them: RecordShow)
@@ -770,8 +950,13 @@ func _award_game_xp(g: Dictionary, home_lines: Dictionary, away_lines: Dictionar
 		var t: PoloTeam = teams[tid]
 		var got: Dictionary
 		if tid == school:
-			# your team: the coaching decisions riding on this game settle with it (CoachEvents)
-			got = CoachEvents.award_game(self, t, home_lines if side == 0 else away_lines, win == tid)
+			# your team: the coaching decisions riding on this game settle with it (CoachEvents),
+			# and its roster's development is read either side of it, for the PLAYER DEVELOPMENT
+			# screen to animate (it only ever shows the difference: nothing is awarded twice)
+			var lines: Dictionary = home_lines if side == 0 else away_lines
+			var before := dev_snapshot(t)
+			got = CoachEvents.award_game(self, t, lines, win == tid)
+			last_dev = {"before": before, "after": dev_snapshot(t), "lines": lines.duplicate(true), "xp": got.duplicate(true)}
 		else:
 			got = Development.award_game(t, home_lines if side == 0 else away_lines, win == tid)
 		if tid == school:
@@ -780,6 +965,20 @@ func _award_game_xp(g: Dictionary, home_lines: Dictionary, away_lines: Dictionar
 			for p in t.roster:
 				Development.ai_spend(p)
 	return mine
+
+## Every player on `t`'s roster as his development stands right now: {id: {xp, idx (his level
+## index: Development.level_index), need (XP his next token costs), tokens, left (boxes left under
+## his ceilings), maxed, attrs: {key: value}}}. Read only: nothing about him changes.
+static func dev_snapshot(t: PoloTeam) -> Dictionary:
+	var out := {}
+	for p in t.roster:
+		Development.ensure(p)
+		var attrs := {}
+		for k in p.key_ratings():
+			attrs[k] = Attributes.value(p, k)
+		out[p.id] = {"xp": p.xp, "idx": Development.level_index(p), "need": Development.xp_needed(p),
+			"tokens": p.tokens, "left": Development.boxes_left(p), "maxed": Development.is_maxed(p), "attrs": attrs}
+	return out
 
 ## The summary's lines for your players' game XP: the best earner, then who has a new upgrade.
 func xp_lines(xp: Dictionary) -> Array:
@@ -833,19 +1032,13 @@ func _after_my_game(g: Dictionary, scores: Dictionary = {}, shootout: bool = fal
 	if won and kind == "conf_final":
 		coach.titles.append("%s %s" % [season_label(), conf_name()])
 		add_news("CONFERENCE CHAMPIONS! %s win the %s" % [team().name, conf_name()])
-		if team().conf == Colleges.D2_CONF:
-			add_news("DIVISION II CHAMPIONS! %s earn the automatic NCSA bid" % team().name)
 	if won and kind == "nat_final":
 		coach.titles.append("%s NCSA" % season_label())
 		add_news("NATIONAL CHAMPIONS! %s win the NCSA title" % team().name)
-	if won and kind == "d3_final":
-		coach.titles.append("%s Division III Championship" % season_label())
-		add_news("DIVISION III NATIONAL CHAMPIONS! %s win the NCSA Division III Championship" % team().name)
-	if D3_FINISH.has(kind) and String(D3_FINISH[kind][0 if won else 1]) != "":
-		season.finish = String(D3_FINISH[kind][0 if won else 1])
 	if not won and LOST_IN.has(kind) and season.finish == "":
 		season.finish = "Lost in the %s" % LOST_IN[kind]
 	add_news("%s %s %s %s" % [team().name, "beat" if won else "lose to", opp.name, Schedule.score_text(g, g.h == school)])
+	Recruiting.after_game(self)   # every AUTO_EVERY games, a free market roll (NEW RECRUITS AVAILABLE)
 	_sim_others(int(g.get("d", Schedule.DAYS)))
 	# and what the season has reached with it (a streak, a title...)
 	credit_lines.append_array(CreditRewards.season_lines(self))
@@ -904,6 +1097,7 @@ func week_line(p: PoloPlayer) -> Dictionary:
 ## your last game of it (up to three a week), and the game is saved.
 func close_postgame() -> void:
 	last_summary = {}
+	last_dev = {}
 	pending_event = {}
 	if not has_game():
 		end_week()
@@ -1001,7 +1195,7 @@ func _sim_others(through: int = Schedule.DAYS, all: bool = false) -> void:
 			var tid: String = g.h if side == 0 else g.a
 			var t: PoloTeam = teams[tid]
 			_record_sim_side(t, res, side)
-			Records.check_game(self, tid, res.goals[side], t.keeper(), int(res.saves[side]), int(res.score[side]), int(res.score[1 - side]))
+			Records.check_game(self, tid, res.goals[side], t.keeper(), int(res.saves[side]), int(res.score[side]), int(res.score[1 - side]), String(g.a if side == 0 else g.h))
 		_award_game_xp(g, _sim_lines(g, res, 0), _sim_lines(g, res, 1))
 	# every result counts into the table exactly once ("n"), however many times this runs; a
 	# round an older save already counted whole is "recorded"
@@ -1049,16 +1243,23 @@ func _sim_game(g: Dictionary) -> Dictionary:
 	var xg := GameSim.pregame_expected(home, away, true, neutral)   # before the game
 	var res := GameSim.play(home, away, rng.randi(), neutral)
 	g.r = GameSim.result_of(res)
-	_grade(home, away, res.lines[0], res.lines[1], xg, "sim")
+	_grade(home, away, res.lines[0], res.lines[1], xg, "sim", res.get("assists", [[], []]))
 	return res
 
 ## Grades both sevens after a game (PlayerForm) and keeps the rows for the summary. `xg` is
-## [a's expected goals, b's] from BASE ratings before the game.
-func _grade(a: PoloTeam, b: PoloTeam, lines_a: Dictionary, lines_b: Dictionary, xg: Array, env: String) -> void:
+## [a's expected goals, b's] from BASE ratings before the game. `assists`: [a's, b's] players
+## credited with an assist. A CPU school's coach then gives its HOT STAR help the way your
+## coaching events give yours (CoachEvents.cpu_coach).
+func _grade(a: PoloTeam, b: PoloTeam, lines_a: Dictionary, lines_b: Dictionary, xg: Array, env: String, assists: Array = [[], []]) -> void:
 	var exp_a := PlayerForm.expected(a, [xg[0], xg[1]], env)
 	var exp_b := PlayerForm.expected(b, [xg[1], xg[0]], env)
 	form_rows[a.id] = PlayerForm.grade_team(a, lines_a, exp_a)
 	form_rows[b.id] = PlayerForm.grade_team(b, lines_b, exp_b)
+	CoachEvents.cpu_coach(self, a, lines_a, assists[0] if assists.size() > 0 and assists[0] is Array else [])
+	CoachEvents.cpu_coach(self, b, lines_b, assists[1] if assists.size() > 1 and assists[1] is Array else [])
+	for t: PoloTeam in [a, b]:
+		if t.id == school:
+			HotTutorial.note_graded(self, form_rows[t.id])
 
 ## No game for you this week: everyone else plays.
 func sim_week_without_me() -> void:
@@ -1083,10 +1284,17 @@ func end_week() -> Dictionary:
 	if not r.is_empty() and r.games.any(func(g): return g.r == null):
 		_sim_others(Schedule.DAYS, true)
 	# the week's games are all in: the conference awards are decided (once)
+	var t_before := tourney_awards.size()
 	var named := ConfAwards.decide_week(self)
 	if not named.is_empty():
 		queue.append({"type": "awards", "year": year, "week": week, "label": ConfAwards.week_label(self, week),
 			"mine": named.filter(func(a): return String(a.team) == school).map(func(a): return [String(a.cat), String(a.name)])})
+	# a tournament of yours decided this week (its final played, whoever played it): its PLAYER OF
+	# THE TOURNAMENT announced, queued (saved) so it waits for the hub and leaves only once seen;
+	# TourneyAwards decides each tournament once, so this is queued once
+	for a in tourney_awards.slice(t_before):
+		if String(a.cat) == "pot" and String(a.tid) in my_tourneys():
+			queue.append({"type": "tourney_award", "year": int(a.year), "tid": String(a.tid)})
 	check_glory()   # (a result that came in some other way than your two game paths)
 	var report := train_week()
 	_weekly_mood()
@@ -1107,11 +1315,17 @@ func end_week() -> Dictionary:
 	# an achievement the week reached on its own (a bid, the regular season done unbeaten)
 	var paid := CreditRewards.season_lines(self)
 	if not paid.is_empty():
-		queue.append({"type": "info", "title": "CREDITS EARNED", "text": "%s\n\nTOTAL: %s" % ["\n".join(CreditRewards.text(paid)), CreditCoin.tag(CreditRewards.total(paid), true)]})
+		queue.append({"type": "info", "title": "POLO POINTS EARNED", "text": "%s\n\nTOTAL: %s" % ["\n".join(CreditRewards.text(paid)), CreditCoin.tag(CreditRewards.total(paid), true)]})
 	if week >= schedule.size():
 		Offseason.begin(self)
 	catch_up()
+	update_season_state(true)   # (knocked out of the NCSA this week: the season's over for you)
 	return report
+
+## The tournaments whose PLAYER OF THE TOURNAMENT you're told of (TourneyAwards' tids): your
+## conference's, and the NCSA's.
+func my_tourneys() -> Array:
+	return ["conf:" + team().conf, "nat"]
 
 ## This week's training, every program's, exactly once a week (`train_cycle` remembers the
 ## last one done, and is saved: reloading, reopening Training or changing the plan never runs it
@@ -1123,7 +1337,10 @@ func train_week() -> Dictionary:
 		return {}
 	train_cycle = cycle
 	var focus := String(training.get("focus", "balanced"))
-	var report := Development.train_team(team(), focus, int(training.get("intensity", 2)), rng, fac("medical"), 1.0 + train_boost)
+	var report := {"xp": {}, "tokens": [], "hurt": [], "healed": []}
+	# knocked out: no more practice for you (no XP from the weeks you don't play); the league trains
+	if not is_eliminated():
+		report = Development.train_team(team(), focus, int(training.get("intensity", 2)), rng, fac("medical"), 1.0 + train_boost)
 	for id in report.hurt:
 		var p := team().find_id(int(id))
 		add_news("%s: %s injury in training" % [p.short_name(), Development.injury_text(p)])
@@ -1153,14 +1370,8 @@ func _announce_round() -> void:
 		if in_it:
 			var bye := my_game().is_empty()
 			add_news("%s are the #%d seed in the %s tournament%s" % [team().name, Schedule.seed_of(season, kind, school, team().conf), conf_name(), " (a first-round bye)" if bye else ""])
-		elif season.finish == "" and Colleges.division(team().conf) != Colleges.D3:
-			# (a Division III team out of its tournament, or with none, can still get an at-large bid)
+		elif season.finish == "":
 			season.finish = "Missed the conference tournament"
-	elif school in (season.get("d3_seeds", []) as Array):
-		add_news("SELECTED! %s are the #%d seed for the NCSA Division III Championship" % [team().name, Schedule.seed_of(season, kind, school, "")])
-	elif Colleges.division(team().conf) == Colleges.D3:
-		if season.finish == "":
-			season.finish = "Conference champions" if school in season.conf_champs else "Missed the NCSA Division III Championship"
 	elif in_it:
 		var bye := my_game().is_empty()
 		add_news("SELECTED! %s are the #%d seed for the NCSA Championship%s" % [team().name, Schedule.seed_of(season, kind, school, ""), " (a first-round bye)" if bye else ""])
@@ -1200,18 +1411,19 @@ func to_dict() -> Dictionary:
 	for id in teams:
 		td[id] = (teams[id] as PoloTeam).to_dict()
 	return {"v": SAVE_VERSION, "rng_seed": str(rng.seed), "rng_state": str(rng.state), "year": year, "week": week,
-		"school": school, "divisions": divisions.duplicate(), "div_pending": div_pending.duplicate(), "div_answers": div_answers.duplicate(),
+		"school": school,
 		"coach": coach.duplicate(true), "teams": td, "credits": credits, "uid": uid, "convertible": convertible, "cv_earned": cv_earned, "cv_out": cv_out,
 		"school_fac": school_fac.duplicate(true), "staff": staff.duplicate(),
 		"training": training.duplicate(), "schedule": schedule.duplicate(true), "table": table.duplicate(true),
 		"season": season.duplicate(true), "history": history.duplicate(true), "news": news.duplicate(true),
 		"queue": queue.duplicate(true), "market": Recruiting.to_save(market), "incoming": Recruiting.to_save(incoming),
-		"refreshes": refreshes, "recruit_warned": recruit_warned, "cr_claims": cr_claims.duplicate(), "phase": phase,
+		"refreshes": refreshes, "auto_games": auto_games, "new_recruits": new_recruits, "dev_recruits": DevRecruits.to_save(dev_recruits), "recruit_warned": recruit_warned, "injury_seen": injury_seen, "hub_seen": hub_seen, "cr_claims": cr_claims.duplicate(), "phase": phase,
+		"season_state": season_state, "elim": elim.duplicate(true), "champ": champ.duplicate(true),
 		"conf_awards": conf_awards.duplicate(true), "award_players": award_players.duplicate(true), "awards_done": awards_done.duplicate(),
 		"national_done": national_done.duplicate(),
 		"tourney_awards": tourney_awards.duplicate(true), "tourney_stats": tourney_stats.duplicate(true), "tourney_done": tourney_done.duplicate(),
 		"cut_pool": cut_pool.map(func(e): return {"p": (e.p as PoloPlayer).to_dict(), "from": String(e.from)}),
-		"league_news": league_news.duplicate(true), "hot_tip": hot_tip, "tutorial": tutorial, "gameplan": gameplan, "next_id": next_id, "game_over": game_over, "difficulty": difficulty, "quarter_min": quarter_min, "dyn_ai": snappedf(dyn_ai, 0.0001), "dyn_hist": dyn_hist.duplicate(true),
+		"league_news": league_news.duplicate(true), "hot_tip": hot_tip, "hot_tutorial_seen": hot_tutorial_seen, "hot_tutorial_pid": hot_tutorial_pid, "tutorial": tutorial, "gameplan": gameplan, "next_id": next_id, "game_over": game_over, "difficulty": difficulty, "quarter_min": quarter_min, "dyn_ai": snappedf(dyn_ai, 0.0001), "dyn_hist": dyn_hist.duplicate(true),
 		"train_boost": snappedf(train_boost, 0.0001), "train_cycle": train_cycle, "cards_seen": cards_seen.duplicate(),
 		"pending_event": pending_event.duplicate(true), "event_log": event_log.duplicate(),
 		"coach_pending": coach_pending.duplicate(true), "coach_results": coach_results.duplicate(true), "coach_seq": coach_seq,
@@ -1229,11 +1441,6 @@ static func from_dict(d: Dictionary) -> Career:
 	c.week = int(d.week)
 	c.school = String(d.school)
 	c.coach = _whole(d.coach)
-	# (a save from before the expansion is a Division I dynasty; its divisions are never guessed
-	# from what the player owns, and loading it again changes nothing)
-	c.divisions = (d.get("divisions", [Colleges.D1]) as Array).map(func(x): return int(x))
-	c.div_pending = (d.get("div_pending", []) as Array).map(func(x): return int(x))
-	c.div_answers = d.get("div_answers", {})
 	for id in d.teams:
 		c.teams[id] = PoloTeam.from_dict(d.teams[id])
 	c.credits = maxi(0, int(d.credits))
@@ -1266,7 +1473,13 @@ static func from_dict(d: Dictionary) -> Career:
 	c.market = Recruiting.from_save(d.get("market", []))
 	c.incoming = Recruiting.from_save(d.get("incoming", []))
 	c.refreshes = int(d.get("refreshes", 0))
+	c.auto_games = int(d.get("auto_games", 0))         # (an older save: counting starts now)
+	c.new_recruits = bool(d.get("new_recruits", false))
+	c.dev_recruits = DevRecruits.from_save(d.get("dev_recruits", d.get("admin_recruits", {})))   # (an older save: "admin_recruits")
 	c.recruit_warned = String(d.get("recruit_warned", ""))
+	c.injury_seen = String(d.get("injury_seen", ""))
+	# (a save from before the hint: that coach already knows the way, so no hint)
+	c.hub_seen = bool(d.get("hub_seen", true))
 	c.cr_claims = (d.get("cr_claims", []) as Array).map(func(x): return String(x))
 	c.conf_awards = _whole_deep(d.get("conf_awards", []))
 	for a in c.conf_awards:
@@ -1285,6 +1498,8 @@ static func from_dict(d: Dictionary) -> Career:
 	c.league_news = _whole_deep(d.get("league_news", []))
 	c.phase = String(d.get("phase", "season"))
 	c.hot_tip = bool(d.get("hot_tip", false))   # (an older save sees the tip once)
+	c.hot_tutorial_seen = bool(d.get("hot_tutorial_seen", false))   # (an older save gets the tutorial once, the next time one of his is HOT)
+	c.hot_tutorial_pid = int(d.get("hot_tutorial_pid", -1))
 	c.tutorial = String(d.get("tutorial", ""))
 	# an older save has no gameplan: the default drop
 	c.gameplan = int(d.get("gameplan", DefenseFormation.DEFAULT_DROP))
@@ -1344,6 +1559,17 @@ static func from_dict(d: Dictionary) -> Career:
 		c.teams[id].sync_lineup()
 	c._give_missing_homes()
 	Records.complete_all(c)   # (an older save: every mark gets its holder; nothing anyone set moves)
+	DevRecruits.migrate(c)   # (an older save: whoever already exists is marked generated)
+	for id in c.teams:
+		DevRecruits.fix_numbers(c.teams[id])   # (their own caps, Blake #11 and Logan #8; not with PIXEL POLO +)
+	# the season's state (an older save: worked out from its schedule; an elimination found this way
+	# was already lived through, so its OH NO! screen never plays)
+	c.season_state = String(d.get("season_state", ""))
+	c.elim = _whole_deep(d.get("elim", {}))
+	c.champ = _whole_deep(d.get("champ", {}))   # (an older save's title was celebrated its own way: none to replay)
+	if not c.season_state in [STATE_ACTIVE, STATE_ELIMINATED, STATE_OFFSEASON]:
+		c.season_state = STATE_ACTIVE
+	c.update_season_state(false)
 	return c
 
 ## The Hometown & Appearance update: a saved player with no hometown gets one, once (it saves with
@@ -1405,8 +1631,13 @@ func _convert_recruiting(d: Dictionary) -> bool:
 ## A save from before a school was renamed ("LIUB Hammerheads" -> "Brooklyn Hammerheads"): its
 ## team takes the name it has now, and the news, the inbox and the record books that quote the
 ## old name quote the new one. Only names change: ids, colours and ratings stay as saved.
+## The league news and the headlines' capitals ("PRINCETON BENGALS") follow too, and so does a
+## renamed place on its own ("PRINCETON WIN THE NCC!", "All-Conference: ... (Princeton)") where
+## the place changed; never a town followed by its state ("Princeton, New Jersey": a hometown).
+## A new mascot ("Stockton Bengals" -> "Stockton Scorpions") replaces the saved one as well.
 func _rename_teams() -> void:
 	var renames := {}
+	var places := {}
 	for id in teams:
 		var t: PoloTeam = teams[id]
 		var s := Colleges.school(id)
@@ -1414,12 +1645,47 @@ func _rename_teams() -> void:
 			continue
 		if t.name != "":
 			renames[t.name] = s.name
+			renames[t.name.to_upper()] = String(s.name).to_upper()
+			var old_mascot := t.mascot if t.mascot != "" else String(s.get("mascot", ""))
+			var was := t.name.trim_suffix(" " + old_mascot)
+			var now := Colleges.place(id)
+			if was != t.name and was != id and was != now:
+				places[was] = now
+				places[was.to_upper()] = now.to_upper()
 		t.name = s.name
+		t.mascot = String(s.get("mascot", t.mascot))
 	if renames.is_empty():
 		return
-	news = _renamed(news, renames)
-	queue = _renamed(queue, renames)
-	records = _renamed(records, renames)
+	news = _renamed_places(_renamed(news, renames), places)
+	queue = _renamed_places(_renamed(queue, renames), places)
+	records = _renamed_places(_renamed(records, renames), places)
+	league_news = _renamed_places(_renamed(league_news, renames), places)
+
+## `v` with every old place in its strings (a whole word, not followed by a comma) swapped for the new one.
+static func _renamed_places(v: Variant, places: Dictionary) -> Variant:
+	if places.is_empty():
+		return v
+	var re := RegEx.create_from_string("\\b(%s)\\b(?!,)" % "|".join(places.keys().map(func(p): return String(p).replace(".", "\\."))))
+	var fix := func(s: String) -> String:
+		var out := ""
+		var at := 0
+		for m in re.search_all(s):
+			out += s.substr(at, m.get_start() - at) + String(places[m.get_string()])
+			at = m.get_end()
+		return out + s.substr(at)
+	return _mapped_strings(v, fix)
+
+static func _mapped_strings(v: Variant, f: Callable) -> Variant:
+	if v is String:
+		return f.call(v)
+	if v is Array:
+		return (v as Array).map(func(x): return _mapped_strings(x, f))
+	if v is Dictionary:
+		var out := {}
+		for k in v:
+			out[k] = _mapped_strings(v[k], f)
+		return out
+	return v
 
 ## `v` with every old team name in its strings swapped for the new one.
 static func _renamed(v: Variant, renames: Dictionary) -> Variant:
@@ -1458,11 +1724,6 @@ func _rename_conferences() -> void:
 	for cf in Colleges.CONFERENCES + Colleges.LEGACY_CONFERENCES:
 		for old in cf.get("old", []):
 			to[String(old)] = String(cf.name)
-	if divisions.has(Colleges.D3):
-		# (the real NWPC and MPSF East are in this dynasty: those words are theirs now, and any text
-		# from before the rebrand was already moved on by an earlier load)
-		to.erase("NWPC")
-		to.erase("MPSF")
 	var re := RegEx.create_from_string("\\b(%s)\\b" % "|".join(to.keys()))
 	var fix := func(t: String) -> String:
 		var out := ""

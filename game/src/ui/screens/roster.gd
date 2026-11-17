@@ -10,10 +10,14 @@ extends BaseScreen
 ## lefty on the roster); the card itself keeps the man's own position (a UT in WG/LFTY is a UT).
 ## Each card: up top, his position, cap number, HOT or VERY HOT, and the
 ## player's front-on headshot (Portrait: his cap, face and build, the same everywhere) on a solid panel;
-## below, his surname and class year (a small red cross while he's hurt), his five stars (StarFx
+## below, his surname and class year, his five stars (StarFx
 ## in Deck.STAR_SHAPE, the game's one star: gold for CURRENT, red after it for HOT / VERY HOT,
 ## nothing for POTENTIAL: the bar ends on his last current star) and a thin XP bar (nothing once
 ## he's fully developed).
+## While he's hurt (starter or sub): a bold medical cross (hurt_cross: white outline, drop
+## shadow, a soft red glow) under his cap number in the portrait's top right, breathing slowly
+## between normal and bright red (still with Reduce Motion), the panels a touch darker red and a
+## thin red border. All of it goes the moment he's healed (it's drawn from p.is_injured()).
 ## No OVR or POT numbers: they're on his page.
 ## The starting keeper's card is red. A place in the seven nobody fills is an OPEN SPOT (tap: recruiting); a bench place
 ## nobody fills is EMPTY.
@@ -38,11 +42,16 @@ extends BaseScreen
 ## two empty places either side of his keeper hold the team: logo, name, record, rating, home or
 ## away, and his home pool.
 
+const HotBadge := preload("res://src/ui/hot_badge.gd")
 const CARD := Vector2(102, 64)   # (the Portrait Zoom update: 55 -> 64, the room all for the portrait)
 const GAP := 6
 const ROW_GAP := 11        # (room for the place's name over the next row's cards)
 const BENCH_GAP := 14      # between the seven and the bench column
 const LABEL_H := 11        # over the first row: the places' names and SUBS
+const FENCE_PAD := 4.0     # the dashed line round the starters: this far out from their cards
+const FENCE_DASH := 2.0
+const FENCE_SKIP := 2.0
+const FENCE_COL := Color(1, 1, 1, 0.45)
 const SPLIT := 39.0        # the divider: the portrait above it, his name and stars below
 const STAR_X := 5.0
 const STAR_Y := 48.0       # the top of the star bar
@@ -55,7 +64,28 @@ const SUB_TOP := Color("27335a")
 const SUB_INFO := Color("202b48")
 const DIVIDER := Color("cca832")  # (UI.GOLD darkened)
 const INJURY := Color("f23b45")
-const CROSS := ["..#..", "..#..", "#####", "..#..", "..#.."]
+const INJURY_HI := Color("ff7f86")     # the pulse's bright end, and the cross's lit corner
+const INJURY_LO := Color("a3162a")     # the cross's shaded corner
+const INJURY_EDGE := Color("e0303c")   # an injured card's border
+const INJURY_TINT := Color("4a0a14")   # what an injured card's panels lean toward, a little
+const TINT_AMT := 0.22
+## The injury mark: a medical cross, 9 x 9 (r red, h its light corner, d its dark one, w the white
+## outline), drawn over a dark copy of its own shape 1 px down and right (the drop shadow) and a
+## soft red glow. 1.8x the old 5 x 5 cross.
+const CROSS := [
+	"..wwwww..",
+	"..whrrw..",
+	"wwwrrrwww",
+	"whrrrrrrw",
+	"wrrrrrrrw",
+	"wrrrrrrdw",
+	"wwwrrdwww",
+	"..wrddw..",
+	"..wwwww.."]
+const CROSS_X := 9.0       # from the card's right edge to the cross's left (under the cap number)
+const CROSS_Y := 13.0
+const PULSE_TIME := 1.8    # one slow breath, normal red to bright and back
+const PULSE_STEPS := 5     # stepped, pixel-art style, not a smooth fade
 const SUB_EDGE := Color("ffffff")
 const SLOT_BG := Color("081751")    # an open spot
 const DEV_W := 26
@@ -71,6 +101,7 @@ const BAD_TIME := 0.3      # a refused drop: the card's border flashes red
 const POS_ORDER := [PoloPlayer.Pos.GK, PoloPlayer.Pos.CENTER, PoloPlayer.Pos.DEFENDER,
 	PoloPlayer.Pos.DRIVER, PoloPlayer.Pos.UTILITY, PoloPlayer.Pos.WING]
 const PLUS := ["..#..", "..#..", "#####", "..#..", "..#.."]
+const WALKON_EDGE := Color("7fe35f")   # a new walk-on's card, from WELCOMING ALL WALK-ONS!
 
 ## The places, as the screen shows them: the 3-3, the keeper, the bench. Each one's place
 ## [column, row] (row 0 on the 2 m line, 1 the perimeter, 2 the keeper; column 3 the bench) and its
@@ -103,6 +134,51 @@ var bad_pid := -1        # a refused drop's card, its border flashing red
 var bad_t := 0.0
 var scout_team: PoloTeam = null   # scouting: the team on show (read only), null: yours
 var scout_lineup: Array = []      # ...its lineup as it stands, read (never written)
+var pulse_step := -1              # the injury cross's pulse step last drawn
+var badge_step := -1              # the HOT stars' fire flicker step last drawn (HotBadge)
+var walkon_ids: Array = []        # VIEW NEW WALK-ONS (WalkOnShow): the new walk-ons, lit up in green
+var walkon_step := -1             # ...their border's pulse step last drawn
+
+## {"walkons": [ids]}: opened from WELCOMING ALL WALK-ONS!, those cards lit up.
+func setup(params: Dictionary) -> void:
+	walkon_ids = (params.get("walkons", []) as Array).map(func(pid): return int(pid))
+
+## Is `p` one of the new walk-ons on show?
+func lit_walkon(p: PoloPlayer) -> bool:
+	return scout_team == null and p != null and walkon_ids.has(p.id)
+
+## The injury crosses breathe: an injured card repaints only when the pulse's step changes (never
+## with Reduce Motion, or in tests: the cross then stays its normal red).
+## A HOT man's burning stars flicker the same way (HotBadge.anim_step), also only with motion on.
+func _process(_dt: float) -> void:
+	if not Juice.enabled():
+		return
+	var s := hurt_step()
+	var hurt_moved := s != pulse_step
+	pulse_step = s
+	var b := HotBadge.anim_step()
+	var badge_moved := b != badge_step
+	badge_step = b
+	var w := int(Time.get_ticks_msec() / 300) % 2
+	if w != walkon_step:
+		walkon_step = w
+		for pid in walkon_ids:
+			if cards.has(pid):
+				cards[pid].queue_redraw()
+	if not hurt_moved and not badge_moved:
+		return
+	for pid in cards:
+		var q := _player(pid)
+		if q == null:
+			continue
+		if (hurt_moved and q.is_injured()) or (badge_moved and shown_form(q) != PlayerForm.NORMAL):
+			cards[pid].queue_redraw()
+
+func _player(pid: int) -> PoloPlayer:
+	for q: PoloPlayer in team().roster:
+		if q.id == pid:
+			return q
+	return null
 
 ## The team on show: an opponent's while scouting (scouted), else yours.
 func team() -> PoloTeam:
@@ -140,20 +216,6 @@ func _ready() -> void:
 		header_right.move_child(dev, 0)
 	set_lineup(c.team())
 	_render()
-	hot_tip()
-
-const HOT_TIP_TITLE := "PLAYERS CAN HEAT UP!"
-const HOT_TIP := "Great performances build momentum and can earn a player up to two red Hot stars.\n\nHot stars boost him for a while, but momentum fades.\n\nTap his portrait card on his page to flip it and see how close he is to heating up!"
-
-## The HOT form tip, once a career (Career.hot_tip, saved): the first time the roster opens with one
-## of yours heating up (a run above 0) or HOT. Returns whether it showed.
-func hot_tip() -> bool:
-	if c.hot_tip or not c.team().roster.any(func(q: PoloPlayer): return q.heat > 0 or PlayerForm.run_score(q.form) > 0):
-		return false
-	c.hot_tip = true
-	Game.save_career()
-	Game.dialog(HOT_TIP_TITLE, HOT_TIP, [["GOT IT", Callable(), "primary"]])
-	return true
 
 ## The team's lineup, in step with its roster: the first time (an older save, a new career) set
 ## from formation(), the seven as they already stood. Saved when it changes.
@@ -329,10 +391,11 @@ static func _head_kv(ci: CanvasItem, y: float, k: String, v: String) -> void:
 
 ## `text` in lines no wider than `w` (whole words).
 static func _wrap(text: String, w: float) -> Array:
+	text = Loc.t(text)   # (the player's LANGUAGE: translated whole, then wrapped)
 	var out: Array = []
 	var line := ""
-	for word in text.split(" "):
-		var next := word if line == "" else line + " " + word
+	for word: String in Loc.units(text):
+		var next := word if line == "" else line + Loc.gap() + word
 		if Deck.text_w(next) <= w or line == "":
 			line = next
 		else:
@@ -386,6 +449,7 @@ func _paint_board(ci: Control) -> void:
 		var at_ := spot_pos(PoloTeam.LINEUP_SPOTS[i])
 		var nm := team().slot_name(i)
 		Deck.ctext(ci, Rect2(at_.x, at_.y - LABEL_H, CARD.x, LABEL_H - 3.0), nm, 8, UI.GOLD if nm.contains("LFTY") else UI.DIM)
+	_starters_fence(ci)
 	var extra := team().roster.size() - lineup().filter(func(pid): return team().find_id(int(pid)) != null).size()
 	if extra > 0:
 		Deck.rtext(ci, bx + CARD.x, floorf((LABEL_H - 3.0) * 0.5), "+%d" % extra, 8, UI.DIM2)
@@ -402,6 +466,36 @@ func _paint_board(ci: Control) -> void:
 		_outline(ci, slot_rect(hover).grow(2.0), 2.0, UI.GOLD)
 	elif under >= 0 and under != drag_from:
 		_outline(ci, slot_rect(under).grow(1.0), 1.0, Color(UI.BAD, 0.8))
+
+## A thin dashed line round the starting seven (their place names inside it), apart from the bench:
+## the two full rows, then narrowing in to the keeper alone, a T.
+static func _starters_fence(ci: CanvasItem) -> void:
+	var m := FENCE_PAD
+	var l := -m
+	var r := CARD.x * 3.0 + GAP * 2.0 + m - 1.0
+	var t := -3.0
+	var y := LABEL_H + CARD.y * 2.0 + ROW_GAP + m
+	var gk := spot_pos("gk")
+	var g0 := gk.x - m
+	var g1 := gk.x + CARD.x + m - 1.0
+	var b := gk.y + CARD.y + m - 1.0
+	var pts := [Vector2(l, t), Vector2(r, t), Vector2(r, y), Vector2(g1, y), Vector2(g1, b),
+		Vector2(g0, b), Vector2(g0, y), Vector2(l, y), Vector2(l, t)]
+	var phase := 0.0
+	for i in pts.size() - 1:
+		phase = _dash_run(ci, pts[i], pts[i + 1], phase, FENCE_COL)
+
+## One straight (level or upright) stretch of the fence, 1 px, FENCE_DASH on and FENCE_SKIP off,
+## carrying the pattern round the corners. Returns where in the pattern it ended.
+static func _dash_run(ci: CanvasItem, a: Vector2, b: Vector2, phase: float, col: Color) -> float:
+	var d := b - a
+	var n := absf(d.x) + absf(d.y)
+	var step := Vector2(signf(d.x), signf(d.y))
+	var period := FENCE_DASH + FENCE_SKIP
+	for k in int(n):
+		if fmod(phase + k, period) < FENCE_DASH:
+			ci.draw_rect(Rect2(a + step * k, Vector2.ONE), col)
+	return fmod(phase + n, period)
 
 static func _outline(ci: CanvasItem, r: Rect2, w: float, col: Color) -> void:
 	ci.draw_rect(Rect2(r.position, Vector2(r.size.x, w)), col)
@@ -518,7 +612,7 @@ func drop(gp: Vector2) -> bool:
 
 ## Can the man at place `a` go to place `b`, and whoever's there to `a`? Only where the
 ## position rules let him (PoloTeam.fits: only a keeper in goal, the posts' men at C and 2MD,
-## a lefty only on the right side); a starting place is never left empty
+## a utility at 2MD too, a lefty only on the right side); a starting place is never left empty
 ## for an empty bench place. Nobody can be dragged from an empty place.
 func can_swap(a: int, b: int) -> bool:
 	if a < 0 or b < 0 or a == b:
@@ -589,6 +683,11 @@ func _render_bottom() -> void:
 	for ch in bottom.get_children():
 		ch.queue_free()
 	if not dev_on:
+		var here := walkon_ids.filter(func(pid): return team().find_id(int(pid)) != null).size()
+		if here > 0 and scout_team == null:
+			var note := Deck.label("%d NEW WALK-ON%s JOINED: TAP A CARD TO MEET THEM" % [here, "" if here == 1 else "S"], 8, WALKON_EDGE)
+			note.name = "WalkOnNote"
+			bottom.add_child(note)
 		return
 	var bh := UI.hbox(GAP)
 	var pl := _picked()
@@ -689,13 +788,22 @@ func _paint_card(ci: CanvasItem, mode: String, p: PoloPlayer, fx: StarFx) -> voi
 		edge = UI.GOLD if on else UI.TEXT
 		if on:
 			Deck.frame(ci, Rect2(-1, -1, w + 2, CARD.y + 2), Color(0, 0, 0, 0), UI.GOLD)
+	var lit := lit_walkon(p) and edge == UI.TEXT
+	if lit:
+		edge = WALKON_EDGE if walkon_step != 1 or not Juice.enabled() else WALKON_EDGE.lightened(0.45)
 	paint_card(ci, p, team(), fx, shown_form(p), edge, bench, false, true, scout_team != null)
+	if lit:
+		# NEW WALK-ON: a green band low on his portrait (where SUSPENDED would go), a second border
+		ci.draw_rect(Rect2(1, SPLIT - 10, w - 2, 9), Color(0.05, 0.3, 0.08, 0.9))
+		Deck.ctext(ci, Rect2(0, SPLIT - 10, w, 9), "NEW WALK-ON", 8, WALKON_EDGE)
+		_outline(ci, Rect2(1, 1, w - 2, CARD.y - 2), 1.0, Color(edge, 0.55))
 
 ## A player's card on its own (the postgame HOT star reveal draws it too): `state` the form his
 ## stars show, `edge` the border colour, `bench` muted navy for a substitute (else the keeper's is
 ## red), top left at the origin, CARD in size. Flat colours only: a solid portrait panel over a
 ## solid info panel, one divider, one 1 px border. Unspent upgrades never show here (the
-## mandatory upgrade pages take care of them); an injury is a small red cross by his class year.
+## mandatory upgrade pages take care of them); an injury is the medical cross under his cap number,
+## a slight red tint and a red resting border.
 ## `recruit`: a high-school prospect's card on the Recruiting screen, the same card with what
 ## doesn't apply to him left off (cap number, injury, XP bar, form). `current`: the Roster
 ## screen's card, only his current stars (no hollow POTENTIAL, no MAX). `scouting`: another
@@ -707,6 +815,20 @@ static func paint_card(ci: CanvasItem, p: PoloPlayer, team: PoloTeam, fx: StarFx
 	var gk := p.is_keeper() and not bench
 	var top := SUB_TOP if bench else GK_TOP if gk else TOP_BG
 	var info := SUB_INFO if bench else GK_INFO if gk else INFO_BG
+	var is_dev := DevArt.is_dev(p)   # a DEV RECRUIT: the light-blue card (DevArt), same layout
+	if is_dev:
+		top = DevArt.ICE_DEEP.darkened(0.15) if bench else DevArt.ICE_DEEP
+		info = DevArt.ICE_SHADE if bench else DevArt.ICE
+		if edge == UI.TEXT:
+			edge = DevArt.EDGE
+	# hurt: the panels lean a little dark red, the resting border goes red (hover, drag and the
+	# other lit borders still win), a pulsing medical cross under his cap number
+	var hurt := p.is_injured() and not recruit
+	if hurt:
+		top = hurt_tint(top)
+		info = hurt_tint(info)
+		if edge == UI.TEXT or edge == DevArt.EDGE:
+			edge = INJURY_EDGE
 	ci.draw_rect(Rect2(1, 1, w - 2, SPLIT - 1), top)
 	# his headshot (Portrait: front on, in your cap, keepers in red), zoomed in (CARD_ZOOM): his
 	# cap at the panel's top, the last of his shoulders under the divider
@@ -714,11 +836,6 @@ static func paint_card(ci: CanvasItem, p: PoloPlayer, team: PoloTeam, fx: StarFx
 	Deck.text(ci, 5, 7, Deck.pos_tag(p), 8, UI.TEXT)
 	if p.number > 0 and not recruit:
 		Deck.rtext(ci, w - 5, 7, "#%d" % p.number, 8, UI.TEXT)
-	# HOT / VERY HOT, low on the left of the portrait (his red stars say it too)
-	if state != PlayerForm.NORMAL:
-		var words := String(PlayerForm.FORM_NAMES[state]).split(" ")
-		for i in words.size():
-			Deck.text(ci, 5, SPLIT - 5.0 - (words.size() - 1 - i) * 8.0, words[i], 8, PlayerForm.form_color(state))
 	# SUSPENDED (a coaching decision): a red band low on the portrait, with the games left
 	if p.is_suspended() and not recruit and not scouting:
 		ci.draw_rect(Rect2(1, SPLIT - 19, w - 2, 18), Color(0.55, 0.04, 0.08, 0.92))
@@ -729,28 +846,38 @@ static func paint_card(ci: CanvasItem, p: PoloPlayer, team: PoloTeam, fx: StarFx
 		ci.draw_rect(Rect2(1, SPLIT - 19, w - 2, 18), Color(0.35, 0.27, 0.0, 0.92))
 		Deck.ctext(ci, Rect2(0, SPLIT - 19, w, 9), "PROVE ME WRONG", 8, UI.GOLD)
 		Deck.ctext(ci, Rect2(0, SPLIT - 11, w, 9), "STARTING", 8, UI.TEXT)
+	if hurt:
+		hurt_cross(ci, Vector2(w - CROSS_X - 5.0, CROSS_Y), hurt_step())
 	ci.draw_rect(Rect2(1, SPLIT, w - 2, h - SPLIT - 1), info)
-	ci.draw_rect(Rect2(1, SPLIT, w - 2, 1), DIVIDER)
-	# his surname, his class year beside it (quieter), a red cross before it while he's hurt
+	ci.draw_rect(Rect2(1, SPLIT, w - 2, 1), DevArt.CYAN if is_dev else DIVIDER)
+	if is_dev:
+		ci.draw_rect(Rect2(1, SPLIT + 1, w - 2, 1), DevArt.ICE_HI)
+	# HOT / VERY HOT: his red stars burn (HotBadge), the fire under the name so it stays legible
+	var line := star_line(p, state)
+	var star_pot: float = line.cur if current else line.pot
+	HotBadge.under(ci, Vector2(STAR_X, STAR_Y), line.cur, star_pot, line.state)
+	# his surname, his class year beside it (quieter)
 	var yr := p.year_text()
-	var hurt := 8.0 if p.is_injured() and not recruit else 0.0
-	var room := w - 15.0 - Deck.text_w(yr) - hurt
+	var room := w - 15.0 - Deck.text_w(yr)
 	var name_size := 8 if Deck.text_w(p.short_name()) <= room else 7
 	var name := Deck.fit(p.short_name(), room, name_size)
-	Deck.text(ci, 5, SPLIT + 5.0, name, name_size, UI.TEXT)
+	Deck.text(ci, 5, SPLIT + 5.0, name, name_size, DevArt.INK if is_dev else UI.TEXT)
 	var yr_x := w - 6.0 - Deck.text_w(yr)
-	Deck.text(ci, yr_x, SPLIT + 5.0, yr, 8, Color("9edcff"))
-	if hurt > 0.0:
-		Deck.pat(ci, Vector2(yr_x - hurt, SPLIT + 3.0), CROSS, {"#": INJURY})
+	Deck.text(ci, yr_x, SPLIT + 5.0, yr, 8, DevArt.INK_SOFT if is_dev else Color("9edcff"))
 	# his stars; MAX beside them when he's fully developed (no XP bar: nothing left to fill).
 	# `current`: his current stars alone, and nothing at all once he's maxed
-	var line := star_line(p, state)
 	fx.bare = current
-	fx.draw(ci, STAR_X, STAR_Y, line.cur, line.cur if current else line.pot, line.state, Color("596170"), Deck.STAR_SHAPE)
+	fx.fire = false   # (the fire is layered here: HotBadge.under before the name, over after)
+	fx.draw(ci, STAR_X, STAR_Y, line.cur, star_pot, line.state, Color(DevArt.INK, 0.3) if is_dev else Color("596170"), Deck.STAR_SHAPE)
+	HotBadge.over(ci, Vector2(STAR_X, STAR_Y), line.cur, star_pot, line.state)
+	if is_dev:
+		# DEV, at the right of his stars (the full label has no room on this card)
+		var cs := DevArt.chip_size(8, "DEV")
+		DevArt.chip(ci, Vector2(w - 5.0 - cs.x, STAR_Y - 1.0), 8, "DEV")
 	if recruit or scouting:
 		pass   # (no XP: he isn't playing for you yet; or he's another program's, and its bar going would say he's maxed)
 	elif Development.is_maxed(p):
-		if not current:
+		if not current and not is_dev:   # (a DEV Recruit's DEV chip has that place)
 			Deck.rtext(ci, w - 6, STAR_Y + 4.0, "MAX", 8, UI.GOLD)
 	else:
 		Deck.xp_bar(ci, Rect2(5, XP_Y, w - 10, 2), xp_fill(p))
@@ -760,6 +887,37 @@ static func paint_card(ci: CanvasItem, p: PoloPlayer, team: PoloTeam, fx: StarFx
 ## Tokens already earned keep the card full; otherwise use the existing XP threshold.
 static func xp_fill(p: PoloPlayer) -> float:
 	return 1.0 if p.tokens > 0 else Development.progress(p)
+
+## An injured card's panel colour: `c` leaned a little toward dark red (TINT_AMT), still readable.
+static func hurt_tint(c: Color) -> Color:
+	return c.lerp(INJURY_TINT, TINT_AMT)
+
+## The injury cross's pulse now: 0 (normal red) up to PULSE_STEPS - 1 (brightest) and back, a slow
+## sine in steps; always 0 with Reduce Motion (and in tests).
+static func hurt_step() -> int:
+	if not Juice.enabled():
+		return 0
+	var t := fmod(Time.get_ticks_msec() / 1000.0, PULSE_TIME) / PULSE_TIME
+	var k := 0.5 - 0.5 * cos(t * TAU)
+	return clampi(int(round(k * (PULSE_STEPS - 1))), 0, PULSE_STEPS - 1)
+
+## The medical cross (CROSS) with its top left at `at`: a soft red glow round it, its drop shadow,
+## the white outline, the red body with a lit and a shaded corner. `step` (hurt_step) brightens the
+## red and the glow toward INJURY_HI.
+static func hurt_cross(ci: CanvasItem, at: Vector2, step: int = 0) -> void:
+	var k := float(step) / float(PULSE_STEPS - 1)
+	var red := INJURY.lerp(INJURY_HI, k * 0.6)
+	# the glow: two stepped rings outside the outline, faint, a little stronger at the pulse's peak
+	var g := 0.16 + 0.14 * k
+	ci.draw_rect(Rect2(at.x + 1, at.y - 1, 7, 11), Color(INJURY, g * 0.6))
+	ci.draw_rect(Rect2(at.x - 1, at.y + 1, 11, 7), Color(INJURY, g * 0.6))
+	ci.draw_rect(Rect2(at.x + 2, at.y - 2, 5, 13), Color(INJURY, g * 0.35))
+	ci.draw_rect(Rect2(at.x - 2, at.y + 2, 13, 5), Color(INJURY, g * 0.35))
+	var shape := {"w": Color(0.03, 0.02, 0.06, 0.8), "r": Color(0.03, 0.02, 0.06, 0.8),
+		"h": Color(0.03, 0.02, 0.06, 0.8), "d": Color(0.03, 0.02, 0.06, 0.8)}
+	Deck.pat(ci, at + Vector2(1, 1), CROSS, shape)
+	Deck.pat(ci, at, CROSS, {"w": UI.TEXT, "r": red, "h": INJURY_HI if step == 0 else Color.WHITE.lerp(INJURY_HI, 0.5),
+		"d": INJURY_LO.lerp(INJURY, k * 0.5)})
 
 ## An open place in the seven: dark navy, a dashed border, a plus and OPEN SPOT. Nobody's card.
 func _paint_open(ci: CanvasItem, mode: String) -> void:

@@ -64,6 +64,41 @@ func run(runner) -> void:
 				if im2.get_pixel(x, y).is_equal_approx(PlayerForm.GOLD):
 					gold += 1
 		r.check(gold > 20, "7/8: his stars drawn (half stars by the game's own bar)")
+		# his potential: hollow stars after the gold, up to his ceiling and no further
+		var was_pot := p.pot_stars
+		var bar_span := func(im: Image) -> int:   # the star row's width, first lit column to last
+			var lo := 9999
+			var hi := -1
+			for y in range(int(scr.STARS_Y), int(scr.STARS_Y) + 9):
+				for x in int(scr.card_size(scr).x):
+					var px := im.get_pixel(x, y)
+					if px.is_equal_approx(PlayerForm.GOLD) or px.is_equal_approx(Deck.STAR_OPEN):
+						lo = mini(lo, x)
+						hi = maxi(hi, x)
+			return hi - lo + 1 if hi >= 0 else 0
+		p.pot_stars = 3.0
+		var at_pot: int = bar_span.call(await _paint(scr, p, c, false, false))
+		p.pot_stars = 4.0
+		var im3 := await _paint(scr, p, c, false, false)
+		var open := 0
+		for y in range(int(scr.STARS_Y), int(scr.STARS_Y) + 9):
+			for x in int(scr.card_size(scr).x):
+				if im3.get_pixel(x, y).is_equal_approx(Deck.STAR_OPEN):
+					open += 1
+		r.check(open > 10, "potential: hollow stars after the gold (2.5 of 4)")
+		r.check(bar_span.call(im3) == at_pot + int(Deck.STAR_STEP), "potential: the bar ends at his ceiling (4 places, not 5: %d vs %d)" % [bar_span.call(im3), at_pot])
+		# a half-star ceiling: the last star is cut in half (nothing drawn past its middle)
+		p.pot_stars = 3.5
+		var im4 := await _paint(scr, p, c, false, false)
+		var past := 0
+		for y in range(int(scr.STARS_Y), int(scr.STARS_Y) + 9):
+			for x in int(scr.card_size(scr).x):
+				if im4.get_pixel(x, y).is_equal_approx(Deck.STAR_PAST):
+					past += 1
+		var cut_w: int = bar_span.call(im4)
+		r.check(past == 0 and cut_w == at_pot + int(Deck.STAR_STEP) - (int(Deck.STAR_SHAPE.w) - int(Deck.STAR_SHAPE.half)),
+			"potential: a 3.5 ceiling ends on half a star (span %d vs %d, %d past-ceiling pixels)" % [cut_w, at_pot, past])
+		p.pot_stars = was_pot
 		# 9: the price in the footer
 		var foot_y := int(scr.CARD_H - 2 - scr.FOOT_H * 0.5)
 		var lit := 0
@@ -77,11 +112,11 @@ func run(runner) -> void:
 	r.check(Deck.text_w(fitted, 8, "caps") <= scr.card_size(scr).x - 12.0, "22: a long surname is fitted inside the card")
 	# 12-15: the tabs
 	Recruiting.toggle_pin(c, c.market[1])
-	(scr.find_child("Tab_PINNED", true, false) as Button).pressed.emit()
+	(scr.find_child("Tab_MARKET", true, false) as Button).pressed.emit()
 	await _frames()
 	scr = Game.current_screen
-	var pins: Array = scr.find_children("Card_*", "", true, false)
-	r.check(pins.size() == 1 and bool(pins[0].get_meta("pinned")) and (scr.find_child("Tab_PINNED", true, false) as Button).text == "PINNED  1", "12/13/14: PINNED: the same card, its pin, the count on the tab")
+	var pins: Array = scr.find_children("Card_*", "", true, false).filter(func(x): return bool(x.get_meta("pinned")))
+	r.check(pins.size() == 1 and scr.find_child("Tab_PINNED", true, false) == null, "12/13/14: no PINNED tab; the pinned prospect keeps his pin on the MARKET")
 	c.credits = 999
 	var err := Recruiting.sign(c, c.market[2])
 	(scr.find_child("Tab_INCOMING", true, false) as Button).pressed.emit()
@@ -96,7 +131,7 @@ func run(runner) -> void:
 	first.pressed.emit()
 	await _frames()
 	r.check(Game.current_name == "player" and Game.current_screen.recruit, "20: a card opens his profile, as ever")
-	r.check(Game.current_screen.find_child("Stars_Potential", true, false) != null, "19: his potential stays on the profile (the card shows his current stars only)")
+	r.check(Game.current_screen.find_child("Stars_Potential", true, false) != null, "19: his potential is on the profile too")
 	var d := Career.from_dict(JSON.parse_string(JSON.stringify(c.to_dict())))
 	r.check(d.market.size() == c.market.size() and d.incoming.size() == 1, "25: the save as ever")
 	Game.career = null
@@ -138,7 +173,7 @@ static func shots(runner, out: String) -> void:
 	Store.reset_for_tests()
 	var c := _career(971)
 	Recruiting.toggle_pin(c, c.market[1])
-	for t in ["MARKET", "PINNED"]:
+	for t in ["MARKET"]:
 		Game.goto("recruiting", {"tab": t, "sel": (c.market[5].p as PoloPlayer).id})
 		await tree.create_timer(0.5).timeout
 		await RenderingServer.frame_post_draw

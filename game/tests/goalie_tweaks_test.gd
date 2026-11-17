@@ -250,8 +250,15 @@ func _formations() -> void:
 			r.check(top == defending,
 				"%s, %s: he comes from the %s of the pool" % [names[f], who, "top" if defending else "bottom"])
 			var c := DefenseFormation.by_tag(p.attackers, "C")
-			r.check(dr != null and dr.pos.distance_to(DefenseFormation.drop_spot(p, c)) < 1.2,
-				"%s, %s: in the same central spot in front of the centre (%.2f m off)" % [names[f], who, dr.pos.distance_to(DefenseFormation.drop_spot(p, c)) if dr != null else 99.0])
+			# (3-4 DROP's piston splits his own man and the centre, his own side: dropper_spot)
+			var spot := DefenseFormation.dropper_spot(p, dr, c) if dr != null else Vector2.INF
+			r.check(dr != null and dr.pos.distance_to(spot) < 1.2,
+				"%s, %s: in his spot in front of the centre (%.2f m off)" % [names[f], who, dr.pos.distance_to(spot) if dr != null else 99.0])
+			if f == F.THREE_FOUR and dr != null:
+				var own := DefenseFormation.by_tag(p.attackers, dr.dtag)
+				var past := (dr.pos.y - c.pos.y) * signf(own.home.y - c.home.y)   # < 0: round the far side
+				r.check(past > -0.35,
+					"B3 3-4 DROP, %s: the dropper stays on his own man's side of the centre (%.2f m)" % [who, past])
 	# the same formation from either end: the mirror image (the same jobs, the other men)
 	for f in [F.FIVE_DROP, F.FOUR_FIVE, F.THREE_FOUR]:
 		var a := _settled(700 + f, f, "3", true)
@@ -353,15 +360,13 @@ func _layouts() -> void:
 		var row := rects.size() == FormationBar.BUTTONS
 		for i in rects.size():
 			row = row and screen.encloses(rects[i]) and rects[i].size.y == rects[0].size.y and rects[i].position.y == rects[0].position.y
-			if i > 0:
-				row = row and is_equal_approx(rects[i].position.x - rects[i - 1].end.x, FormationBar.GAP) and not rects[i].grow(1.0).intersects(rects[i - 1].grow(1.0))
-		r.check(row, "D2 %s: two buttons (PRESS, your drop) in one row, equal heights, even gaps, on screen" % label)
+		r.check(row, "D2 %s: one button, CALL DROP, on screen" % label)
 		r.check(rects[0].position.x >= left and rects[0].size.y >= 26.0 and rects[rects.size() - 1].end.x <= size.x - ins.y,
 			"D1/D5 %s: tall (%.0f px, was 13), clear of your keeper's tag" % [label, rects[0].size.y])
 		var order := true
 		for i in rects.size():
 			order = order and fb.hit(rects[i].get_center()) == i
-		r.check(order, "D %s: PRESS | your drop, left to right" % label)
+		r.check(order, "D %s: CALL DROP takes its own taps" % label)
 
 # ------------------------------------------------------------------ the match screen
 func _match(seed_value: int):
@@ -557,28 +562,29 @@ func _screen() -> void:
 	_touch(ms, ms.stick.rest + Vector2(-60, 0), false)
 	r.check(not ms.aim.active and _shots(dp) == 0 and dp.holder == dholder, "E7 ...and no shot")
 	var rects: Array[Rect2] = ms.fbar.rects
-	r.check(rects.size() == 2 and rects[0].size.y >= 26.0, "D1 the buttons are tall in the match (%.0f px)" % (rects[0].size.y if rects.size() > 0 else 0.0))
+	r.check(rects.size() == 1 and rects[0].size.y >= 26.0, "D1 CALL DROP is tall in the match (%.0f px)" % (rects[0].size.y if rects.size() > 0 else 0.0))
 	var tag_end: float = ms._insets().x + 3.0 + Hud.tag_parts(dp.keeper.player).size.x
-	r.check(rects.size() == 2 and rects[0].position.x > tag_end, "D5 ...clear of your keeper's tag")
-	# D3/D4: a touch at a corner of the drop button (4-5 DROP here: its top-left, far above the old 13 px bar) picks it
+	r.check(rects.size() == 1 and rects[0].position.x > tag_end, "D5 ...clear of your keeper's tag")
+	# D3/D4: a touch at a corner of CALL DROP (4-5 DROP the gameplan here: its top-left, far above the old 13 px bar) calls it
 	ms.flow.drop = F.FOUR_FIVE
-	var corner := rects[1].position + Vector2(1, 1)
+	var corner := rects[0].position + Vector2(1, 1)
 	r.check(corner.y < ms.get_viewport_rect().size.y - 17.0, "(that corner is above where the old bar ended)")
 	_touch(ms, corner, true)
 	_touch(ms, corner, false)
-	r.check(dp.formation == F.FOUR_FIVE and dp.formation_locked, "D3/D4 the top corner of 4-5 DROP picks it")
-	# D4: each of the two can be picked (a fresh possession each), at its top edge
+	r.check((dp.formation == F.FOUR_FIVE or dp.drop_pending == F.FOUR_FIVE) and dp.formation_locked, "D3/D4 the top corner of CALL DROP calls 4-5 DROP")
+	# D4: called from its top edge (a fresh possession each time)
 	var picked := 0
 	for i in 2:
 		ms.flow._start_defense(Play.Kind.HALF_COURT)
 		ms._process(DT)
 		await _frames(1)
 		var rr: Array[Rect2] = ms.fbar.rects
-		var top := Vector2(rr[i].get_center().x, rr[i].position.y + 1)
+		var top := Vector2(rr[0].get_center().x + (i * 20 - 10), rr[0].position.y + 1)
 		_touch(ms, top, true)
 		_touch(ms, top, false)
-		picked += 1 if ms.flow.play.formation == ms.flow.user_formations()[i] and ms.flow.play.formation_locked else 0
-	r.check(picked == 2, "D4 both picked from their top edge (%d / 2)" % picked)
+		var dq: Play = ms.flow.play
+		picked += 1 if dq.formation_locked and (dq.formation == ms.flow.drop or dq.drop_pending == ms.flow.drop) else 0
+	r.check(picked == 2, "D4 called from its top edge (%d / 2)" % picked)
 	Game.save_settings()
 	Game.goto("title")
 	await _frames(1)

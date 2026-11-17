@@ -45,7 +45,9 @@ var lineup: Array = []
 ## roster (slot_name), plain WG and ATK otherwise.
 ##   GK      a keeper only
 ##   C       a centre or a 2MD (a centre first)
-##   2MD     a 2MD or a centre (a 2MD first); in an emergency anybody (fill_places)
+##   2MD     a 2MD, a centre or a utility (a 2MD first); in an emergency anybody (fill_places).
+##           A utility is the coach's choice only: the team's own seven (fill_places) still puts
+##           a centre or 2MD under the posts
 ##   ATK, WG an attacker, wing or utility, never a lefty
 ##   ATK/LFTY, WG/LFTY  an attacker, wing, utility or lefty: two lefties at most ever start
 ##   bench   anybody
@@ -61,6 +63,28 @@ const FILL_ORDER := [0, 1, 4, 3, 2, 5, 6]
 ## to the best legal man from the bench (_lineup_starters), or the team's own position-aware
 ## seven (_auto_starters). Never more than seven.
 func starters() -> Array[PoloPlayer]:
+	# Remembered against everything the choice reads (_starters_key): a screen asks for the seven
+	# dozens of times while it draws (OVR, OFF, DEF, power...), and working them out without a
+	# lineup is ~1 ms each. Any change to the lineup or a player that matters picks them again.
+	var key := _starters_key()
+	if key != _st_key:
+		_st_key = key
+		_st_seven = _pick_starters()
+	return _st_seven.duplicate()
+
+var _st_key: Array = []
+var _st_seven: Array[PoloPlayer] = []
+
+## Everything starters() depends on: the lineup, and for every man on the roster (in order) who
+## he is and what fill_places / _auto_starters / _lineup_starters read of him.
+func _starters_key() -> Array:
+	var k: Array = [lineup.duplicate()]
+	for p in roster:
+		k.append_array([p, p.id, p.pos, p.lefty, p.rolled, p.susp, p.overall(), p.keeping, p.pro,
+			p.attrs.get("str"), p.attrs.get("dfn")])
+	return k
+
+func _pick_starters() -> Array[PoloPlayer]:
 	if not lineup.is_empty():
 		var seven := _lineup_starters()
 		if seven.size() == STARTERS:
@@ -100,7 +124,11 @@ static func fit_rank(p: PoloPlayer, i: int) -> int:
 		Slot.C:
 			return 0 if p.pos == PoloPlayer.Pos.CENTER and not p.is_lefty() else (1 if p.pos == PoloPlayer.Pos.DEFENDER and not p.is_lefty() else 2)
 		Slot.TWO_MD:
-			return 0 if p.pos == PoloPlayer.Pos.DEFENDER and not p.is_lefty() else (1 if p.pos == PoloPlayer.Pos.CENTER and not p.is_lefty() else 2)
+			if p.is_lefty():
+				return 2
+			if p.pos == PoloPlayer.Pos.DEFENDER:
+				return 0
+			return 1 if p.pos in [PoloPlayer.Pos.CENTER, PoloPlayer.Pos.UTILITY] else 2
 		Slot.ATK_L, Slot.WG_L:
 			if p.is_lefty():
 				return 0
@@ -651,5 +679,6 @@ static func from_dict(d: Dictionary) -> PoloTeam:
 	t.initial_strength_target = float(d.get("init_target", 0.0))
 	for pd in d.get("roster", []):
 		t.roster.append(PoloPlayer.from_dict(pd))
+	PlayerForm.trim_hot(t)   # (a save from before the HOT SLOTS cap: never more than three hot)
 	t.lineup = Array(d.get("lineup", [])).map(func(v): return int(v))
 	return t

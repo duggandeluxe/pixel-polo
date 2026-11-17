@@ -1,37 +1,35 @@
 extends "res://src/ui/screens/play_lab.gd"
 ## Developer Mode's VISUAL UPGRADE TESTING (Settings > Developer Mode): a visual upgrade's levels
 ## on demand, whatever you own, through the match's own code: a real possession (play_lab) scored,
-## then the replay (ReplayBuffer, ReplayShow) or the goal show and GoalFx at the level picked; or
-## the stands (CrowdArt) with a full or a quiet crowd.
-##   CATEGORY         the six; a category whose effects aren't built yet says so
+## then the goal show and GoalFx at the level picked; or the stands (CrowdArt) at each Crowd
+## Atmosphere level, for any of the 30 home schools.
+##   CATEGORY         the five; a category whose effects aren't built yet says so
+## SCOREBOARD: the board at the level picked over the stage (a late, close game), the goal going
+## up on it; the full tool is SCOREBOARD VISUAL PREVIEW (scoreboard_lab.gd).
 ##   LEVEL 1 .. 4     the level to preview
 ##   PREVIEW SELECTED plays it    COMPARE LEVELS every level in turn, the same goal
 ##   GOAL: PLAIN / BAR-DOWN       the goal shown
-##   CROWD: QUIET / FULL / CHEER  how many are in, and a goal's reaction (Crowd Atmosphere)
-##   GAME: REGULAR / BIG / CONF / NCSA  the win or the entrance previewed (a title: the trophy)
+##   HOME: <SCHOOL> / CHEER       the home school (all 30, its real colours) and a goal's reaction;
+##                                Crowd Atmosphere's status line says how full the stands are
+##   GAME: REGULAR / BIG / CONF / NCSA  the entrance previewed
 ## Broadcast previews use lab numbers (a hat trick, so the milestone shows); in a match they're
 ## always the match's own.
 ##   MOTION           Reduce Motion's version (the lab's own)   TEST SKIP   RESET PREVIEW
 ## Nothing is spent, owned, counted or saved (play_lab's teams; Store.looks is never touched).
 
-var cat_i := 1                # INSTANT REPLAY STUDIO first: the one built so far
+var cat_i := 0                # GOAL CELEBRATIONS first
 var lv := 1
 var bar_goal := false
 var calm := false
-var rec := ReplayBuffer.new()
-var show: ReplayShow = null
-var clip := {}
 var queue: Array = []         # levels still to play (COMPARE)
-var scoring := false
 var skips := 0
-var crowd_full := true
 var cheer := 0.0
 var goal_run := false         # Goal Celebrations: a goal's show running
 var crowd_t := -1.0           # Crowd Atmosphere's COMPARE: s until the next level
 var crowd_btn: Button
 var game_i := 0               # REGULAR, BIG, CONF, NCSA
 var game_btn: Button
-var cine = null               # a VictoryShow or PregameIntro playing
+var cine = null               # a PregameIntro playing
 var bc: BroadcastFx = null    # Broadcast Presentation's graphic
 var rows_ui: Array = []       # the button rows
 var schools: Array = []       # NEXT SCHOOL: all 30, made here
@@ -39,12 +37,17 @@ var school_i := 0
 var cat_btn: Button
 var goal_btn: Button
 var motion_btn: Button
+var board_st := MatchState.new()   # the SCOREBOARD preview's game: Q4, 1:12, 7-6 (nothing counted)
 
 func lab_title() -> String:
 	return "VISUAL UPGRADE TESTING"
 
 func _ready() -> void:
 	lab_ready(lab_title())
+	use_career_teams()
+	board_st.score = [7, 6]
+	board_st.quarter = 4
+	board_st.clock = 72.0
 	var r1 := _row()
 	cat_btn = _btn("", func():
 		cat_i = (cat_i + 1) % VisualUpgrades.CATS.size()
@@ -60,7 +63,6 @@ func _ready() -> void:
 	r2.add_child(_btn("COMPARE LEVELS", compare, 92, "Compare"))
 	goal_btn = _btn("", func():
 		bar_goal = not bar_goal
-		clip = {}
 		_labels(), 100, "GoalKind", "ghost")
 	r2.add_child(goal_btn)
 	motion_btn = _btn("", func():
@@ -71,8 +73,10 @@ func _ready() -> void:
 	r3.add_child(_btn("TEST SKIP", test_skip, 80, "TestSkip"))
 	r3.add_child(_btn("RESET PREVIEW", reset_preview, 92, "ResetPreview", "ghost"))
 	crowd_btn = _btn("", func():
-		crowd_full = not crowd_full
-		_labels(), 90, "CrowdFill", "ghost")
+		next_school()
+		if cat_id() == "crowd":
+			_show_stands()
+		_labels(), 90, "HomeSchool", "ghost")
 	r3.add_child(crowd_btn)
 	r3.add_child(_btn("CHEER", func(): cheer = 1.6, 56, "Cheer"))
 	game_btn = _btn("", func():
@@ -105,7 +109,7 @@ func _labels() -> void:
 	cat_btn.text = String(VisualUpgrades.CATS[cat_i].name)
 	goal_btn.text = "GOAL: %s" % ("BAR-DOWN" if bar_goal else "PLAIN")
 	motion_btn.text = "MOTION: %s" % ("CALM" if calm else "FULL")
-	crowd_btn.text = "CROWD: %s" % ("FULL" if crowd_full else "QUIET")
+	crowd_btn.text = "HOME: %s" % Colleges.short_name(us).to_upper()
 	game_btn.text = "GAME: %s" % ["REGULAR", "BIG", "CONF", "NCSA"][game_i]
 	var top := VisualUpgrades.top(cat_id())
 	lv = mini(lv, top)
@@ -113,10 +117,9 @@ func _labels() -> void:
 		var b: Button = find_child("Level%d" % (n + 1), true, false)
 		if b != null:
 			b.visible = n < top
+			b.text = "LEVEL %d" % (n if cat_id() == "goal" else n + 1)   # (Goal Celebrations count from 0)
 			UI.style_button(b, "primary" if n + 1 == lv else "normal")
-	status = "%s LEVEL %d: %s" % [cat_btn.text, lv, String(VisualUpgrades.CATS[cat_i].tiers[lv - 1][0])]
-	if cat_id() == "replay":
-		status = "INSTANT REPLAY" if lv >= 2 else "INSTANT REPLAY: LOCKED"
+	status = "%s LEVEL %d: %s" % [cat_btn.text, lv - 1 if cat_id() == "goal" else lv, String(VisualUpgrades.CATS[cat_i].tiers[lv - 1][0])]
 
 func settled() -> void:
 	if goal_run:
@@ -125,12 +128,6 @@ func settled() -> void:
 			lv = queue.pop_front()
 			_score_goal()
 			return
-	if scoring:
-		scoring = false
-		clip = rec.clip()
-		rec.clear()
-		_next_show()
-		return
 	new_play()
 	_hold_ball()
 	paused = true
@@ -145,30 +142,6 @@ func _hold_ball() -> void:
 	s.facing = 1.0
 	play.give_ball(s)
 
-## Scores the goal to show (once; PREVIEW and COMPARE reuse it).
-func _score() -> void:
-	rec.clear()
-	var d := BarHit.demo("bar", false) if bar_goal else {}
-	new_play()
-	_hold_ball()
-	if not d.is_empty():
-		play.holder.pos = d.from
-		play.holder.target = d.from
-	paused = false
-	scoring = true
-	for i in 30:       # (a moment of real play before the shot, for the clip's build-up)
-		play.step(1.0 / 30.0)
-		rec.tick(1.0 / 30.0, play.bodies(), ReplayBuffer.ball_of(play.ball, {}), view)
-	if d.is_empty():
-		play.dev_goal(Geo.GOAL_Y - 0.6, 0.55)
-	else:
-		play.dev_goal(float(d.cross_y), float(d.height))
-	# the sample goal's keeper: a real dive, the wrong way, for the play to run as a shot's own
-	if play.ball.state == Ball.State.SHOT:
-		var way: int = KeeperDive.RIGHT if float(play.ball.shot.cross_y) < play.keeper.pos.y else KeeperDive.LEFT
-		play.ball.shot["dive"] = KeeperDive.from_body(KeeperDive.body_of(play.keeper.player), way, play.keeper.pos.y).to_dict()
-		play.ball.shot["keeper_go"] = 0.14
-
 ## A goal for Goal Celebrations: the match's own show at level `lv`.
 func _score_goal() -> void:
 	var d := BarHit.demo("bar", false) if bar_goal else {}
@@ -179,7 +152,7 @@ func _score_goal() -> void:
 		play.holder.target = d.from
 	paused = false
 	goal_run = true
-	status = "LEVEL %d: %s" % [lv, String(VisualUpgrades.CATS[cat_i].tiers[lv - 1][0])]
+	status = "LEVEL %d: %s" % [lv - 1 if cat_id() == "goal" else lv, String(VisualUpgrades.CATS[cat_i].tiers[lv - 1][0])]   # (Goal Celebrations count from 0)
 	if d.is_empty():
 		play.dev_goal(Geo.GOAL_Y - 0.6, 0.55)
 	else:
@@ -188,7 +161,7 @@ func _score_goal() -> void:
 func _show_stands() -> void:
 	new_play()
 	paused = true
-	status = "CROWD LEVEL %d: %s" % [lv, String(VisualUpgrades.cat("crowd").tiers[lv - 1][0])]
+	status = "CROWD LEVEL %d: %s  %d%% FULL" % [lv, String(VisualUpgrades.cat("crowd").tiers[lv - 1][0]), roundi(CrowdArt.fill_of(lab_style()) * 100.0)]
 
 ## Plays the picked level. False if that category's effects don't exist yet.
 func preview() -> bool:
@@ -197,47 +170,50 @@ func preview() -> bool:
 		return false
 	queue.clear()
 	match cat_id():
-		"goal", "broadcast":
+		"goal", "broadcast", "scoreboard":
 			_score_goal()
 		"crowd":
 			_show_stands()
-		"victory", "pregame":
+		"pregame":
 			_play_cine(lv)
-		_:
-			if lv == 1:
-				_score_goal()   # LOCKED: the goal's own show, then straight on
-				status = "LOCKED: THE GOAL, THEN THE RESTART"
-			else:
-				queue = [ReplayShow.CINEMATIC]
-				_start()
 	return true
 
-## A win or an entrance at level `l`: the match's own object, on the stage.
+## An entrance at level `l`: the match's own object, on the stage.
 func _play_cine(l: int) -> void:
-	if cat_id() == "victory":
-		cine = VictoryShow.new(us, l, ["", "", "conf", "nat"][game_i], game_i == 1, calm or HotFire.calm())
-		cine.crowd = lab_crowd()
-		cine.score = [12, 9]
-	else:
-		var it := PregameIntro.new(us, them, true, ["REGULAR SEASON", "REGULAR SEASON", "CONFERENCE TOURNAMENT", "NCSA CHAMPIONSHIP"][game_i], "")
-		it.calm = calm or HotFire.calm()
-		it.set_level(l)
-		var ev := PoolView.new()
-		ev.width = maxf(stage_cv.size.x, 120.0)
-		ev.height = maxf(stage_cv.size.y, 80.0)
-		ev.snap_to(Sprint.new(us, them, 0.0).focus())
-		it.end_view = ev
-		cine = it
+	var it := PregameIntro.new(us, them, true, ["REGULAR SEASON", "REGULAR SEASON", "CONFERENCE TOURNAMENT", "NCSA CHAMPIONSHIP"][game_i], "")
+	it.calm = calm or HotFire.calm()
+	it.set_level(l)
+	var ev := PoolView.new()
+	ev.width = maxf(stage_cv.size.x, 120.0)
+	ev.height = maxf(stage_cv.size.y, 80.0)
+	ev.snap_to(Sprint.new(us, them, 0.0).focus())
+	it.end_view = ev
+	cine = it
 	status = "LEVEL %d: %s" % [l, String(VisualUpgrades.CATS[cat_i].tiers[l - 1][0])]
 
-## The next school's real colours and logo on the stage (of all 30).
+## Your dynasty's team at home and its rival (VisualUpgrades.preview_rival_id), as copies: their
+## real names, colours, logos and players, nothing a preview does reaching the save. Read fresh
+## each time the screen opens, so a new program or another save shows at once. Without a career
+## (or a rival) the lab's own made-up teams stay.
+func use_career_teams() -> void:
+	var c: Career = Game.career
+	var mine := VisualUpgrades.preview_team(c, c.school) if c != null else null
+	var rival := VisualUpgrades.preview_team(c, VisualUpgrades.preview_rival_id(c))
+	if mine == null or rival == null:
+		return
+	us = mine
+	them = rival
+
+## The next school's real colours and logo on the stage (of all 30), going on from the one shown.
 func next_school() -> String:
 	if schools.is_empty():
 		schools = Career.new_setup(777).teams.values()
+		var at: int = schools.map(func(s: PoloTeam): return s.id).find(us.id)
+		if at >= 0:
+			school_i = at
 	school_i = (school_i + 1) % schools.size()
 	us = schools[school_i]
 	them = schools[(school_i + 7) % schools.size()]
-	clip = {}
 	settled()
 	status = Colleges.display_name(us.name).to_upper()
 	return us.id
@@ -249,69 +225,33 @@ func lab_goal(who: PoloPlayer) -> void:
 
 func compare() -> bool:
 	match cat_id():
-		"goal", "broadcast":
+		"goal", "broadcast", "scoreboard":
 			queue = range(2, VisualUpgrades.top(cat_id()) + 1)
 			lv = 1
 			_score_goal()
-		"victory", "pregame":
+		"pregame":
 			queue = range(2, VisualUpgrades.top(cat_id()) + 1)
 			_play_cine(1)
 		"crowd":
 			lv = 1
 			crowd_t = 2.0
 			_show_stands()
-		_:
-			queue = [ReplayShow.PLAIN, ReplayShow.CINEMATIC]   # (the two presentations; LOCKED has nothing to show)
-			_start()
 	return true
 
-func _start() -> void:
-	if clip.is_empty():
-		_score()
-	else:
-		_next_show()
-
-func _next_show() -> void:
-	if queue.is_empty() or clip.is_empty():
-		show = null
-		status = "DONE  (PREVIEW AGAIN TO REPLAY)" if not clip.is_empty() else "NOTHING RECORDED"
-		return
-	var l: int = queue.pop_front()
-	show = ReplayShow.new(clip, l, calm or HotFire.calm())
-	show.who = "LAB PLAYER"
-	show.team = Colleges.short_name(us).to_upper()
-	show.col = US_CAP
-	show.paint_body = func(ci: CanvasItem, v: PoolView, sw: Swimmer): PoolArt.draw_body(ci, v, sw, _cap(sw), _trim(sw))
-	status = "INSTANT REPLAY: %s" % ("CINEMATIC" if l == ReplayShow.CINEMATIC else "BASIC")
-
+## TEST SKIP: an entrance (Pregame Presentation) cut short, back to the lab. False if there's
+## none to skip (the other categories' previews have nothing to skip).
 func test_skip() -> bool:
-	if cine != null:
-		cine.skip()
-		cine = null
-		queue.clear()
-		skips += 1
-		status = "SKIPPED: BACK TO THE LAB"
-		return true
-	if show == null:
-		if not preview():
-			return false
-		if show == null:
-			return true   # (scoring first: the skip test runs on the next press)
-	show.skip()
+	if cine == null and (cat_id() != "pregame" or not preview()):
+		return false
+	cine.skip()
+	cine = null
+	queue.clear()
 	skips += 1
 	status = "SKIPPED: BACK TO THE LAB"
-	show = null
-	queue.clear()
 	return true
 
 func reset_preview() -> void:
-	if show != null:
-		show.skip()
-	show = null
 	queue.clear()
-	clip = {}
-	rec.clear()
-	scoring = false
 	goal_run = false
 	crowd_t = -1.0
 	cheer = 0.0
@@ -325,15 +265,17 @@ func reset_preview() -> void:
 	settled()
 
 func lab_goal_level() -> int:
-	return lv if cat_id() == "goal" else 1
+	return lv - 1 if cat_id() == "goal" else VisualUpgrades.CLASSIC   # (Goal Celebrations: LEVEL 0-3 on buttons 1-4)
 
 func lab_style() -> Dictionary:
 	if cat_id() != "crowd":
 		return {}
-	return CrowdArt.style(lv, us, them, false, lab_crowd(), calm or HotFire.calm(), 0)
+	return CrowdArt.style(lv, us, them, false, lab_crowd(), calm or HotFire.calm(), 0, LAB_SEED)
+
+const LAB_SEED := 7           # the lab's stands: the same seats every preview
 
 func lab_crowd() -> float:
-	return (0.95 if crowd_full else 0.45) if cat_id() == "crowd" else 0.6
+	return 0.6
 
 func lab_excite() -> float:
 	return cheer
@@ -367,26 +309,37 @@ func _process(dt: float) -> void:
 			if not queue.is_empty():
 				_play_cine(queue.pop_front())
 			else:
-				status = "DONE  (PREVIEW AGAIN TO REPLAY)"
-		stage_cv.queue_redraw()
-		return
-	if show != null:
-		show.step(dt)
-		if show.done:
-			_next_show()
+				status = "DONE  (PREVIEW TO SEE IT AGAIN)"
 		stage_cv.queue_redraw()
 		return
 	super(dt)
-	if scoring and play != null:
-		rec.tick(dt * goal_show.time_scale() * bar_show.play_scale(), play.bodies(), ReplayBuffer.ball_of(play.ball, _net()), view)
 
 func _draw_stage(ci: Control) -> void:
 	if cine != null:
 		cine.draw(ci, ci.size)
 		return
-	if show != null:
-		show.draw(ci, ci.size)
-		return
 	super(ci)
 	if bc != null:
-		bc.draw(ci, ci.size, false, false, scratch)
+		bc.draw(ci, ci.size, false, scratch)
+	if cat_id() == "scoreboard":
+		draw_board(ci, lv)
+
+## The SCOREBOARD preview: level `l`'s board along the stage's top, the goal going up on it. The
+## board and the shot clock on its left are centred together (the board alone, as in a match, would
+## push the shot clock off a narrow stage's left edge); a stage too narrow for both side by side
+## has the board centred and the shot clock tucked under its left end, never cut off.
+const SC_ROOM := 40.0          # the widest shot clock (Premium's 34 + its shadow) and its gap
+func draw_board(ci: Control, l: int) -> Rect2:
+	var side := Scoreboard.width(l, us, them) + SC_ROOM + 4.0 <= ci.size.x
+	var board := Hud.scoreboard(ci, ci.size.x + (SC_ROOM if side else 0.0), board_st, us, them, US_CAP, them.cap_against(US_CAP), them.trim_against(US_CAP), goal_show.board_fx(), l)
+	var sc := play.shot_clock if play != null else 30.0
+	if side:
+		Scoreboard.shot_clock(ci, l, board, sc)
+	else:
+		# shot_clock() sits at the top beside the board it's given: give it one starting past the
+		# shot clock's own width, and draw it a row below the real board
+		var at := maxf(board.position.x, 2.0)
+		ci.draw_set_transform(Vector2(0, board.end.y + 1.0))
+		Scoreboard.shot_clock(ci, l, Rect2(at + SC_ROOM - 3.0, 0, 0, 0), sc)
+		ci.draw_set_transform(Vector2.ZERO)
+	return board

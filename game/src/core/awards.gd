@@ -24,8 +24,10 @@ static func _win_pct(c: Career, id: String) -> float:
 	return float(r.w) / maxf(1.0, float(r.w) + float(r.l))
 
 ## Hands out the awards. `prestige_before`: team id -> prestige at the start of the off-season
-## (for Coach of the Year). Returns lines for the season review.
-static func run(c: Career, prestige_before: Dictionary) -> Array:
+## (for Coach of the Year). Returns lines for the season review. `out`, if given, gets the
+## All-Conference team as data too ("all_conf": [{pid, name, team, pos, conf}], keeper first) for
+## the redesigned review (SeasonReview): the same picks, nothing chosen twice.
+static func run(c: Career, prestige_before: Dictionary, out: Dictionary = {}) -> Array:
 	var lines: Array = []
 	var field: Array = []
 	var keepers: Array = []
@@ -61,16 +63,19 @@ static func run(c: Career, prestige_before: Dictionary) -> Array:
 	var ck: Array = keepers.filter(func(e): return (c.teams[e[1]] as PoloTeam).conf == conf).slice(0, 1)
 	var names := PackedStringArray()
 	var mine := 0
+	var picks: Array = []
 	for e in ck + cf:
 		var p: PoloPlayer = e[0]
 		p.awards.append("%s All-Conference" % c.season_label())
 		names.append("%s (%s)" % [p.short_name(), Colleges.short_name(c.teams[e[1]])])
+		picks.append({"pid": p.id, "name": "%s %s" % [p.first, p.last], "team": String(e[1]), "pos": p.pos, "conf": conf})
 		if e[1] == c.school:
 			mine += 1
 	if not names.is_empty():
 		lines.append("All-Conference: " + ", ".join(names))
 	if mine > 0:
 		c.add_news("%d %s players named All-Conference" % [mine, c.team().name])
+	out["all_conf"] = picks
 	return lines
 
 static func _give(c: Career, key: String, p: PoloPlayer, team_id: String, extra: String = "") -> String:

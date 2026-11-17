@@ -12,7 +12,7 @@ static func report(runner, matches: int = 12) -> void:
 	for i in matches:
 		var a: PoloTeam = c.teams[ids[(i * 2) % ids.size()]]
 		var b: PoloTeam = c.teams[ids[(i * 2 + 5) % ids.size()]]
-		var f := MatchFlow.new(a, b, 5000 + i, MatchState.QUARTER_MIN, Difficulty.MEDIUM)
+		var f := MatchFlow.new(a, b, 5000 + i, MatchState.QUARTER_MIN, Difficulty.BASELINE)
 		os._match(f)
 		var box := f.state.box(a, b)
 		var won0: bool = box.won

@@ -6,8 +6,8 @@ extends RefCounted
 ## {n, group, text, ok, look}; `look` means the check needs eyes or a screen: the lab points you
 ## at it, and tests/refinement_test.gd checks it with the real screens.
 
-const GROUPS := {"A": "DYNASTY HUB", "B": "HISTORICAL RECORDS", "C": "INSTANT REPLAY", "D": "BROADCAST", "E": "VICTORY",
-	"F": "CURRENCY", "G": "SHOP & EXPANSION", "H": "PIXEL POLO +", "I": "RECRUITING UI", "J": "GAMEPLAY"}
+const GROUPS := {"A": "DYNASTY HUB", "B": "HISTORICAL RECORDS", "C": "INSTANT REPLAY (REMOVED)", "D": "BROADCAST", "E": "VICTORY",
+	"F": "CURRENCY", "G": "SHOP", "H": "PIXEL POLO +", "I": "RECRUITING UI", "J": "GAMEPLAY"}
 const DT := 1.0 / 60.0
 const F := DefenseFormation.F
 
@@ -61,7 +61,7 @@ func _records() -> void:
 		for k in Records.KEYS:
 			named = named and String(book[k].name).strip_edges() != "" and int(book[k].v) > 0 and not String(book[k].name).to_lower() in Records.NO_NAME
 		assists = assists and String(book.season_assists.name) != ""
-	_ok(5, named and RecordBook.SCHOOLS.size() == 30 and RecordBook.EXPANSION.size() == 24, "all 30 schools, all %d records: a value and a named holder" % Records.KEYS.size())
+	_ok(5, named and RecordBook.SCHOOLS.size() == 30, "all 30 schools, all %d records: a value and a named holder" % Records.KEYS.size())
 	_ok(6, assists, "Assists in a Season has a holder everywhere")
 	var same := true
 	for id in RecordBook.SCHOOLS:
@@ -83,25 +83,21 @@ func _records() -> void:
 	_ok(11, int(bk.season_goals.v) == old + 5 and String(bk.season_goals.name) == "Z. Current" and String(bk.season_assists.name) != "" and String(bk.career_assists.name) != "", "an old save: achievements kept, blanks filled")
 
 # ------------------------------------------------------------------ C
+## INSTANT REPLAY: removed from the game since (VisualUpgrades.RETIRED). What's checked now is that
+## it's gone and that an old save that had it still loads, nothing else lost and nothing refunded.
 func _replay() -> void:
 	group = "C"
-	_ok(12, VisualUpgrades.top("replay") == 2, "no tiers: locked, or unlocked")
-	var c := Career.new_game("CULA", "A", "B", 904)
-	c.credits = 500
-	var lk := VisualUpgrades.new()
-	var why := lk.buy_tier("replay", c, CoinVault.new())
-	_ok(13, why == "" and lk.level("replay") == VisualUpgrades.top("replay") and lk.tier_block("replay", c, CoinVault.new()) != "", "one purchase unlocks it, and there's nothing more to buy")
-	_ok(14, VisualUpgrades.REPLAY_PRICE == 500 and c.credits == 0, "it costs 500 Yellow Coins")
-	var paid := _mig({"unlocked": {"replay": 3}, "equipped": {"replay": 3}})
-	var paid2 := _mig({"unlocked": {"replay": 2}, "equipped": {"replay": 2}})
-	_ok(15, paid.looks.level("replay") == 2 and paid2.looks.level("replay") == 2 and paid.bank.balance == 0, "paid owners keep it, charged nothing, whichever tier")
-	_ok(16, ReplayShow.level_for(2, "cinematic") == ReplayShow.CINEMATIC, "the unlock plays the cinematic replay (3D replay stays removed, your call)")
-	_look(17, "PREVIEW REPLAY plays before purchase", "visual_shop")
-	_ok(18, ReplayShow.level_for(1, "cinematic") == 1 and ReplayShow.level_for(2, "basic") == ReplayShow.PLAIN, "off plays nothing; BASIC plays the plain replay")
-	_look(19, "replays don't change a match (--test replay: same seed, same result)", "")
-	var show := ReplayShow.new({}, ReplayShow.CINEMATIC, true)
-	show.skip()
-	_ok(20, show.done, "a replay can be skipped")
+	var ids: Array = VisualUpgrades.CATS.map(func(cd): return String(cd.id))
+	_ok(12, VisualUpgrades.cat("replay").is_empty() and ids == ["goal", "crowd", "broadcast", "pregame", "scoreboard"], "INSTANT REPLAY is gone: five Visual Upgrades left")
+	var old := VisualUpgrades.from_dict({"unlocked": {"replay": 2, "crowd": 2, "broadcast": 3}, "equipped": {"replay": 2, "crowd": 2, "broadcast": 2},
+		"celebs": [1], "celeb": 1, "celeb_v": VisualUpgrades.CELEB_V, "crowd_v": VisualUpgrades.CROWD_V})
+	_ok(13, not old.unlocked.has("replay") and not old.equipped.has("replay") and old.level("crowd") == 2 and old.worn("broadcast") == 2 and old.worn_celeb() == 1,
+		"an old save that owned it loads without it, every other upgrade owned and worn as before")
+	_ok(14, not old.to_dict().unlocked.has("replay") and not old.to_dict().equipped.has("replay"), "...and saves without it")
+	var paid := _mig({"unlocked": {"replay": 2}, "equipped": {"replay": 2}})
+	_ok(15, paid.bank.balance == 0 and paid.looks.unlocked.is_empty(), "no refund for it: the balance is left exactly as it was")
+	var l4 := _mig({"unlocked": {"replay": 4}, "bought": [{"txn": "r4", "what": "replay:4", "n": 40}]})
+	_ok(16, l4.bank.balance == 40 * Wallet.RATE, "the old 3D replay's Level 4 refund (an account from before the currency move) still paid, once")
 
 ## An account with `looks` (and `blue` Blue Coins) through the migration.
 func _mig(looks: Dictionary, blue := 0) -> Dictionary:
@@ -126,33 +122,11 @@ func _broadcast() -> void:
 # ------------------------------------------------------------------ E
 func _victory() -> void:
 	group = "E"
-	var t := League.make_team(3, 1)
-	var v := [VictoryShow.new(t, 1), VictoryShow.new(t, 2), VictoryShow.new(t, 3), VictoryShow.new(t, 4)]
-	_ok(26, String(v[0].parts().scene) == "classic" and int(v[0].parts().fireworks) == 0, "Level 1: the basic graphic")
-	_ok(27, String(v[1].parts().scene) == "fireworks" and int(v[1].parts().fireworks) > 0, "Level 2: fireworks")
-	_ok(28, String(v[2].parts().scene) == "huddle" and bool(v[2].parts().bench) and int(v[2].parts().fireworks) > 0, "Level 3: the team huddle by the bench")
-	_ok(29, String(v[3].parts().scene) == "trophy" and bool(v[3].parts().robes) and bool(v[3].parts().trophy), "Level 4: the trophy in robes")
-	_look(30, "team colors are right", "visual_lab")
-	_look(31, "players keep the Pixel Polo style", "visual_lab")
-	var c := Career.new_game("CULA", "A", "B", 905)
-	var before := JSON.stringify(c.to_dict())
-	var honours := TeamHonours.of(c, c.school).size()
-	var show := VictoryShow.new(c.team(), 4, "", false, true)
-	for i in 500:
-		show.step(DT)
-	_ok(32, JSON.stringify(c.to_dict()) == before and show.done, "a whole show changes nothing in the dynasty")
-	var plain := VictoryShow.new(c.team(), 4)
-	_ok(33, not bool(plain.parts().title) and plain.trophy() == TrophyArt.texture("celebration", false) and plain.trophy() != TrophyArt.texture("conf_champ", false) and TeamHonours.of(c, c.school).size() == honours,
-		"a regular win's cup is decoration: no title, nothing in the Trophy Case")
-	_look(34, "all four can be previewed", "visual_shop")
-	var lk := VisualUpgrades.from_dict({"unlocked": {"victory": 4}})
-	_ok(35, lk.equip("victory", 1) and lk.equip("victory", 3) and lk.worn("victory") == 3 and lk.equip("victory", 4), "any owned level can be worn")
-	var sk := true
-	for lv in [1, 2, 3, 4]:
-		var x := VictoryShow.new(t, lv)
-		x.skip()
-		sk = sk and x.done and x.skipped
-	_ok(36, sk, "every level can be skipped")
+	# (no longer a Visual Upgrade, and the win presentation itself is gone from the game since)
+	_ok(26, not ResourceLoader.exists("res://src/match/victory_show.gd"), "no victory presentation: a win goes straight to the full-time panel")
+	_ok(27, VisualUpgrades.cat("victory").is_empty() and not VisualUpgrades.BUILT.has("victory"), "Victory Presentation isn't sold in Visual Upgrades")
+	var old := VisualUpgrades.from_dict({"unlocked": {"victory": 4, "crowd": 2}, "equipped": {"victory": 3}})
+	_ok(29, not old.unlocked.has("victory") and not old.equipped.has("victory") and old.level("crowd") == 2, "an old save's Victory levels are dropped, the rest kept")
 
 # ------------------------------------------------------------------ F
 func _currency() -> void:
@@ -168,7 +142,7 @@ func _currency() -> void:
 	old.balance = 10
 	var st := {"v": 0, "bank": y, "old": old, "looks": VisualUpgrades.new(), "pro": false, "pro_coins": false}
 	EconomyMigration.run(st)
-	_ok(40, y.balance == 350, "existing Yellow Coins are kept, not converted (300 + 50)")
+	_ok(40, y.balance == 350, "existing Polo Points are kept, not converted (300 + 50)")
 	EconomyMigration.run(st)
 	EconomyMigration.run(st)
 	_ok(41, y.balance == 350, "running it again does nothing")
@@ -176,7 +150,7 @@ func _currency() -> void:
 	c.credits = 130
 	var lk := VisualUpgrades.new()
 	var bank := CoinVault.new()
-	_ok(42, lk.buy_tier("goal", c, bank) == "" and c.credits == 5, "premium purchases spend Yellow Coins")
+	_ok(42, lk.buy_tier("crowd", c, bank) == "" and c.credits == 5, "premium purchases spend Polo Points")
 	var v := CoinVault.new()
 	v.credit(500, "t1")
 	_ok(43, v.balance == 500 and not v.credit(500, "t1") and v.balance == 500, "a coin purchase lands once in the shared balance")
@@ -196,25 +170,18 @@ func _currency() -> void:
 func _shop() -> void:
 	group = "G"
 	var coins: Array = Store.PACK_IDS.map(func(id): return int(Store.product(id).credits))
-	_ok(48, coins == [500, 1750, 3250, 7000], "the packs sell Yellow Coins: old amounts x 5")
+	_ok(48, coins == [60, 180, 350, 800], "the packs sell 60 / 180 / 350 / 800 Polo Points (the Polo Points Economy update)")
 	var dollars: Array = Store.PACK_IDS.map(func(id): return float(Store.product(id).usd))
 	_ok(48, dollars == [1.99, 5.99, 9.99, 19.99] and is_equal_approx(float(Store.product(Store.PRO_ID).usd), 7.99), "$1.99, $5.99, $9.99, $19.99; Pixel Polo + $7.99")
 	_look(49, "Cap Shop stays removed (your Nov 4 decision)", "")
-	_ok(50, Store.DIVISIONS.has("div2"), "Division II is listed")
-	_ok(51, Store.DIVISIONS.has("div3"), "Division III is listed")
-	_ok(52, Store.DIVISIONS.div2.product in Store.NON_CONSUMABLES and Store.DIVISIONS.div3.product in Store.NON_CONSUMABLES, "both are one-time products")
-	_ok(52, is_equal_approx(float(Store.DIVISIONS.div2.usd), 2.99) and is_equal_approx(float(Store.DIVISIONS.div3.usd), 3.99), "planned prices: $2.99 and $3.99")
-	_ok(53, not Store.PRODUCTS.has("div2") and not Store.PRODUCTS.has("div3"), "neither is a product: there's nothing to buy")
-	_ok(54, Colleges.SCHOOLS.size() == 30, "Division I is still the same 30 schools")
-	_ok(55, Colleges.CONFERENCES.size() == 5 and Career.new_game("CULA", "A", "B", 955).teams.size() == 30, "a Division I dynasty has only those schools and five conferences")
-	_look(56, "New Dynasty has no expansion choice", "")
-	_look(57, "no expansion popup", "")
+	_ok(54, Colleges.SCHOOLS.size() == 30, "the same 30 schools")
+	_ok(55, Colleges.CONFERENCES.size() == 5 and Career.new_game("CULA", "A", "B", 955).teams.size() == 30, "a dynasty has only those schools and five conferences")
 
 # ------------------------------------------------------------------ H
 func _pro() -> void:
 	group = "H"
-	_ok(58, Store.PRO_PERKS.size() == 4 and String(Store.PRO_PERKS[0]).contains("500"), "the card's four benefits")
-	_look(59, "a new purchase grants 500 once (--test refinement)", "")
+	_ok(58, Store.PRO_PERKS.size() == 2 and String(Store.PRO_PERKS[0]).contains("200"), "the card's two benefits")
+	_look(59, "a new purchase grants 200 once (--test refinement)", "")
 	_look(60, "a restore grants nothing (--test refinement)", "")
 	var c := Career.new_game("CULA", "A", "B", 909)
 	var p: PoloPlayer = c.team().roster[2]
@@ -234,7 +201,6 @@ func _pro() -> void:
 	var q: PoloPlayer = back.team().find_id(id)
 	_ok(65, q != null and q.last == "Bennett" and q.number == free, "edits survive a save")
 	_ok(66, q != null and q.id == id and JSON.stringify(q.to_dict().get("stats", {})) == stats, "same id, same statistics")
-	_ok(67, not Colleges.SCHOOLS.any(func(s): return Store.DIVISIONS.has(String(s.short))), "no pack's id is a Division I school's")
 
 # ------------------------------------------------------------------ I
 func _recruiting() -> void:

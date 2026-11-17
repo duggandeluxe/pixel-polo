@@ -24,6 +24,8 @@ func run(runner) -> void:
 	_even_settles()
 	_breakaway()
 	_speeds()
+	_no_back_pass()
+	_surge()
 
 func _teams() -> Array:
 	return [League.make_team(2, 1), League.make_team(3, 1)]
@@ -433,3 +435,125 @@ func _speeds() -> void:
 				w.fastest = maxf(w.fastest, d.vel.length() / (d.top_speed * PlayAI.CENTER_TRAIL_BOOST)))
 	var fastest: float = w.fastest
 	r.check(fastest <= 1.001, "counter: no defender swims faster than he can (%.2f of his best)" % fastest)
+
+# ------------------------------------------------------------------ the counter's rules
+## Their counter (OffenseAI, `defending`): the ball at 20 m, one man behind him but over halfway
+## (`back`), one still in his own half (`trail`), everybody else excluded (`out`: they don't count).
+## Both are behind the ball, so while `trail` is in his own half there's no pass at all to choose.
+func _back_stage(defending: bool, flip: bool) -> Dictionary:
+	var p := _set_play(Vector2(20.0, 10.0), 11, defending)
+	var fy := func(y: float) -> float: return 2.0 * Geo.GOAL_Y - y if flip else y
+	p.holder.pos.y = fy.call(10.0)
+	var others := p.attackers.filter(func(a: Swimmer): return a != p.holder)
+	var back: Swimmer = others[0]
+	var trail: Swimmer = others[1]
+	back.pos = Vector2(16.0, fy.call(15.0))
+	trail.pos = Vector2(10.0, fy.call(4.0))
+	for a in others.slice(2):
+		a.out = true
+	for s in p.bodies():
+		s.target = s.pos
+	p.kind = Play.Kind.COUNTER
+	p.carry = true
+	p.counter_t = 5.0
+	return {"p": p, "back": back, "trail": trail}
+
+func _no_back_pass() -> void:
+	for flip in [false, true]:
+		var nm := ", flipped" if flip else ""
+		var st := _back_stage(true, flip)
+		var p: Play = st.p
+		var ai := OffenseAI.new()
+		r.check(p.back_pass_barred(), "counter rules: their counter, a man still in his own half: no ball back" + nm)
+		var backs := 0
+		for seed_value in 30:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = seed_value
+			for any in [true, false]:
+				var b := ai._best_pass(p, rng, 0.0, 0.0, any)
+				if not b.is_empty() and Play.is_back_pass(p.holder.pos, b.throw.target):
+					backs += 1
+			var f := ai._freest_mate(p)
+			if not f.is_empty():
+				backs += 1
+			var d := ai.think(p, rng, false, 20.0)
+			if not d.is_empty() and Play.is_back_pass(p.holder.pos, d.target):
+				backs += 1
+		r.check(backs == 0, "counter rules: ...never chosen, not even as the safe ball (%d)%s" % [backs, nm])
+		# nothing forward on: he swims it on (no freezing, no forced throw)
+		var x0 := p.holder.pos.x
+		_step(p, 1.0)
+		r.check(p.holder != null and p.holder.pos.x > x0 + 1.0, "counter rules: ...with nothing forward he swims it on (%.1f m)%s" % [p.holder.pos.x - x0 if p.holder != null else 0.0, nm])
+		# everybody over halfway: the ball back is there again
+		st = _back_stage(true, flip)
+		p = st.p
+		(st.trail as Swimmer).pos.x = 17.0
+		r.check(not p.back_pass_barred(), "counter rules: everybody over halfway: the restriction's off" + nm)
+		var rng2 := RandomNumberGenerator.new()
+		var b2 := ai._best_pass(p, rng2, 0.0, 0.0, true)
+		r.check(not b2.is_empty() and Play.is_back_pass(p.holder.pos, b2.throw.target), "counter rules: ...and a ball back can be chosen" + nm)
+		# an excluded man (or one swimming back in) doesn't hold it up
+		st = _back_stage(true, flip)
+		p = st.p
+		(st.trail as Swimmer).out = true
+		r.check(not p.back_pass_barred(), "counter rules: the man left in his half excluded: he doesn't count" + nm)
+		(st.trail as Swimmer).out = false
+		(st.trail as Swimmer).rejoin = true
+		r.check(not p.back_pass_barred(), "counter rules: ...nor one swimming back in from the box" + nm)
+		# the counter over, or a settled possession: back to normal
+		st = _back_stage(true, flip)
+		p = st.p
+		p.end_counter()
+		r.check(not p.back_pass_barred(), "counter rules: the counter's over: passing is normal again" + nm)
+		st = _back_stage(true, flip)
+		p = st.p
+		p.carry = false
+		p.kind = Play.Kind.HALF_COURT
+		r.check(not p.back_pass_barred(), "counter rules: a settled possession: never" + nm)
+		# your counter: you can throw it anywhere
+		st = _back_stage(false, flip)
+		p = st.p
+		r.check(not p.back_pass_barred(), "counter rules: your counter: no restriction" + nm)
+		r.check(p.pass_to(st.trail), "counter rules: ...you can pass it back" + nm)
+	r.check(Play.is_back_pass(Vector2(20, 10), Vector2(18, 10)) and not Play.is_back_pass(Vector2(20, 10), Vector2(20, 16)) 		and not Play.is_back_pass(Vector2(20, 10), Vector2(24, 4)), "counter rules: back is along the attack: square and forward balls aren't")
+
+## The counter's speed: Play.COUNTER_SURGE on the attack's field players going forward, nobody else,
+## never stacked, gone with the counter.
+func _surge() -> void:
+	var s := Swimmer.new(_teams()[0].starters()[1], Swimmer.Side.US)
+	s.target = Vector2(100.0, 0.0)
+	s.surge = Play.COUNTER_SURGE
+	for i in 240:
+		s.step(DT)
+	r.check(absf(s.speed() / s.top_speed - 1.25) < 0.001, "counter speed: flat out, exactly 25%% faster (%.3f)" % (s.speed() / s.top_speed))
+	for v in _variants():
+		var nm := _name(v)
+		var p := _break(3, 2, v[0], v[1])
+		var w := {"bad_def": 0, "bad_att": 0, "max": 0.0, "on": 0}
+		_step(p, 1.0, func():
+			if not p.carry:
+				return
+			for d in p.defenders:
+				if d.surge != 1.0:
+					w.bad_def += 1
+			if p.keeper.surge != 1.0:
+				w.bad_def += 1
+			for a in p.attackers:
+				if a.surge != 1.0 and a.surge != Play.COUNTER_SURGE:
+					w.bad_att += 1
+				if a.surge > 1.0:
+					w.on += 1
+				w.max = maxf(w.max, a.speed() / (a.top_speed * a.boost * a.pace)))
+		r.check(w.bad_def == 0, "counter speed: the defence getting back never gets it (%s)" % nm)
+		r.check(w.bad_att == 0 and w.on > 0, "counter speed: the attack does, never stacked (%s)" % nm)
+		r.check(w.max <= Play.COUNTER_SURGE + 0.01, "counter speed: nobody past 1.25x his own speed (%.3f, %s)" % [w.max, nm])
+		var h := p.holder
+		if h != null and p.carry:
+			r.check(absf(h.speed() / h.top_speed - Play.COUNTER_SURGE) < 0.04, "counter speed: the man with the ball at 1.25x (%.3f, %s)" % [h.speed() / h.top_speed, nm])
+		p.end_counter()
+		_step(p, 1.0 / 60.0)
+		var left := 0
+		for s2 in p.bodies():
+			if s2.surge != 1.0:
+				left += 1
+		r.check(left == 0, "counter speed: gone the moment the counter ends (%s)" % nm)

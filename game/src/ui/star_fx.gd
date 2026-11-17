@@ -15,6 +15,7 @@ extends Node
 ## All of it is whole pixels in a handful of flat colours, steps not gradients; a star grows by a
 ## 1 px rim, never scaled. Only drawing: form, stars and saves are
 ## never touched. Off with Settings > Reduce motion and in tests (Juice.enabled), unless `force`.
+const _StarFlames := preload("res://src/ui/hot_badge.gd")   # the fire round red stars (HotBadge)
 
 const HEAT_TIME := 0.9
 const COOL_TIME := 0.4
@@ -52,6 +53,8 @@ var particles := true          # the embers and sparks
 var loop := false              # replay the transition over and over
 var force := false             # play even with reduce motion on (Developer Mode)
 var bare := false              # only the lit part of each star: no hollow outline past it (the Roster screen)
+var fire := true               # HOT / VERY HOT: his red stars burn (HotBadge), the game's one fire-star look;
+                               # off where the caller layers HotBadge itself (Roster.paint_card)
 var from_state := PlayerForm.NORMAL
 var to_state := PlayerForm.NORMAL
 var _tw: Tween
@@ -308,8 +311,13 @@ func draw(ci: CanvasItem, x: float, y: float, cur: float, pot: float, state: Str
 		if il.warm:
 			for f in fills:
 				f.form_col = Color(f.form_col).lerp(WARM.lightened(0.3), 0.34)
+		var burn := fire and state != PlayerForm.NORMAL and shape == Deck.STAR_SHAPE
+		if burn:
+			_StarFlames.under(ci, Vector2(x, y), cur, pot, state)
 		for i in fills.size():
 			Deck.star_place(ci, at.call(i), fills[i], empty, 0, _to(fills[i], sw), shape)
+		if burn:
+			_StarFlames.over(ci, Vector2(x, y), cur, pot, state)
 		var fp := form_place(cur, pot, state)
 		if fp >= 0:
 			var p: Vector2 = at.call(fp)

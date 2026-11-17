@@ -8,7 +8,6 @@ extends RefCounted
 var r   # the test runner
 
 func run(runner) -> void:
-	load("res://src/ui/screens/new_career.gd").start_filter = Colleges.D1   # (the Road to Glory's thirty; --test divisions has the rest)
 	r = runner
 	print("all-teams unlock")
 	Store.reset_for_tests()

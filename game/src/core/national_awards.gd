@@ -81,7 +81,7 @@ static func run(c: Career) -> Array:
 	var def_scores := def_values(rest)
 	var dpoy_list := _ranked(rest, func(e): return float(def_scores[(e.p as PoloPlayer).id]))
 	var fresh := overall_values(everyone, games, FOY_GK_HANDICAP)
-	var foy_list := _ranked(rest.filter(func(e): return (e.p as PoloPlayer).year == 1), func(e): return float(fresh[(e.p as PoloPlayer).id]))
+	var foy_list := _ranked(rest.filter(func(e): return WalkOns.is_rookie(e.p as PoloPlayer)), func(e): return float(fresh[(e.p as PoloPlayer).id]))
 	var dpoy = dpoy_list[0] if not dpoy_list.is_empty() else null
 	var foy = foy_list[0] if not foy_list.is_empty() else null
 	if dpoy != null and foy != null and dpoy.p == foy.p:

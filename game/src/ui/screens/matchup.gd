@@ -1,8 +1,11 @@
 extends BaseScreen
-## The game preview, opened from the hub's PLAY NEXT GAME: the two teams side by side (home on
-## the left) with their logos, records and ratings, then PLAY or SIM.
+## The game preview, opened from the hub's PLAY NEXT GAME: the two teams side by side (yours on
+## the left, wherever the game is played) with their logos, records and ratings, then PLAY GAME, START IN SIM (the match,
+## watched from kickoff) or SIM TO END (the whole game at once, straight to its summary).
 
 const SIDE_W := 170   # every team's name on one line, in the big font
+const PLAY_W := 180   # the bottom row: PLAY GAME, then START IN SIM and SIM TO END the same size
+const SIM_W := 104    # (180 + 2 x 104 + 2 gaps of 6: 400 of the 480 px page)
 
 var busy := false   # the match or the summary is already on its way: ignore more taps
 var tight := false  # a coaching strip to fit: the logos a size smaller
@@ -29,17 +32,21 @@ func _ready() -> void:
 	if stakes != null:
 		body.add_child(centered(stakes))
 	body.add_child(UI.spacer(0, 0, true))
-	# PLAY GAME and SIM THIS GAME side by side (room for the venue bar above them)
+	# PLAY GAME | START IN SIM | SIM TO END in one row (room for the venue bar above them): PLAY
+	# the big yellow one, the two sims blue and the same size
 	var buttons := UI.hbox(6)
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
-	var play := Deck.button("PLAY GAME  >", _play, "primary", 190, 22)
+	var play := Deck.button("PLAY GAME  >", _play, "primary", PLAY_W, 22)
 	play.name = "Play"
 	play.add_theme_font_override("font", UI.font_big)
 	play.add_theme_font_size_override("font_size", 20)
 	buttons.add_child(play)
-	var sim := Deck.button("SIM THIS GAME", _sim, "ghost", 110, 22)
+	var sim := Deck.button("START IN SIM", _sim, "ghost", SIM_W, 22)
 	sim.name = "Sim"
 	buttons.add_child(sim)
+	var to_end := Deck.button("SIM TO END", _sim_to_end, "danger", SIM_W, 22)
+	to_end.name = "SimToEnd"
+	buttons.add_child(to_end)
 	body.add_child(centered(buttons))
 	body.add_child(UI.spacer(0, 1))
 	Sfx.music("menu")
@@ -78,7 +85,7 @@ func _coaching_panel() -> Control:
 	var line := UI.hbox(6)
 	line.alignment = BoxContainer.ALIGNMENT_CENTER
 	for s in segs.slice(0, 2):
-		line.add_child(UI.label(String(s[0]), 8, s[1], "caps"))
+		line.add_child(CreditCoin.rich(String(s[0]), 8, s[1], "caps"))
 	v.add_child(line)
 	var p := navy_panel(v)
 	p.add_theme_stylebox_override("panel", UI.chunky(Deck.NAVY, UI.BORDER, false, false, 6, 1))
@@ -110,18 +117,16 @@ func _venue_bar(named: String) -> Control:
 	v.add_child(name)
 	return p
 
-## Home on the left, away on the right.
+## Your team on the left, the opponent on the right (home, away or neutral).
 func _matchup(opp: PoloTeam) -> Control:
-	var home := c.team() if c.is_home() else opp
-	var away := opp if c.is_home() else c.team()
 	var h := UI.hbox(8)
-	h.add_child(_side(home))
+	h.add_child(_side(c.team()))
 	var vs := UI.label("VS", 20, UI.DIM, "big")
 	vs.custom_minimum_size.y = 60
 	vs.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	vs.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	h.add_child(vs)
-	h.add_child(_side(away))
+	h.add_child(_side(opp))
 	return h
 
 ## One team: big logo, name, seed and record, then its team overall as a big number (OVR), and
@@ -178,22 +183,55 @@ func _side(t: PoloTeam) -> Control:
 	return v
 
 func _play() -> void:
-	if busy:
+	_start(false)
+
+## START IN SIM: the very match PLAY GAME starts, from 0:00 at 0-0, with the match's live SIM on from
+## kickoff (MatchScreen.sim_at_start): watched, and the pause menu's RETURN TO GAME takes it over.
+func _sim() -> void:
+	_start(true)
+
+func _start(in_sim: bool) -> void:
+	if busy or not c.has_game():
 		return
 	busy = true
-	Game.match_cfg = {"us": c.team(), "them": c.opponent(), "seed": randi(),
+	Game.match_cfg = _match_cfg(in_sim)
+	Game.goto("match", Game.match_cfg)
+
+## SIM TO END: the whole game worked out at once, never on the match screen. The very match PLAY
+## GAME would start (same teams, difficulty, quarter length, gameplan, home pool or neutral site),
+## then SimFinish from 0:00 at 0-0: the engine the match's own SIM TO END uses, so the box score,
+## stats and score are a played game's. Then exactly what full time does: DYNAMIC's game counted
+## (Difficulty.after_game), the career's postgame (Career.finish_my_game: stats, XP, form,
+## injuries, the record, standings, recruiting, the schedule on), saved, and the game summary.
+## Once: `busy`, and finish_my_game settles a box only once.
+func _sim_to_end() -> void:
+	if busy or not c.has_game():
+		return
+	busy = true
+	var cfg := _match_cfg(false)
+	Game.match_cfg = cfg
+	var flow := MatchFlow.new(cfg.us, cfg.them, int(cfg.seed), float(cfg.minutes), Difficulty.level_for(true))
+	flow.home = bool(cfg.home)
+	flow.set_gameplan(c.gameplan)
+	SimFinish.run(flow, bool(cfg.neutral), flow.rng.randi())
+	Difficulty.after_game(true, flow.state.score[0], flow.state.score[1], flow.us, flow.them)
+	c.last_summary = c.finish_my_game(flow.state.box(flow.us, flow.them))
+	Game.save_career()
+	Game.goto("game_summary")
+
+## The match PLAY GAME and START IN SIM start (`in_sim`: SIM on from kickoff).
+func _match_cfg(in_sim: bool) -> Dictionary:
+	return {"us": c.team(), "them": c.opponent(), "seed": randi(),
 		"career": true, "home": c.is_home(), "pool": c.venue().id, "venue": c.venue_name(), "stage": PregameIntro.label_for(c.cur(), c.my_game()),
 		"neutral": Schedule.is_neutral(c.my_game()), "importance": _importance(),
 		"title": _title_at_stake(),
-		"minutes": float(MatchState.quarter_min_for(true))}   # (read once: a change in Settings is for the next game)
-	Game.goto("match", Game.match_cfg)
+		"minutes": float(MatchState.quarter_min_for(true)),   # (read once: a change in Settings is for the next game)
+		"start_sim": in_sim}
 
-## The championship a win here takes: "conf", "nat", "d2" (the WWPA's final is Division II's), "d3".
+## The championship a win here takes: "conf" or "nat".
 func _title_at_stake() -> String:
 	var kind := Schedule.game_kind(c.cur(), c.my_game())
-	if kind == "conf_final" and c.team().conf == Colleges.D2_CONF:
-		return "d2"
-	return String({"conf_final": "conf", "nat_final": "nat", "d3_final": "d3"}.get(kind, ""))
+	return String({"conf_final": "conf", "nat_final": "nat"}.get(kind, ""))
 
 ## How much this game matters to the crowd: 2 the NCSA Championship, 1 the conference tournament
 ## or a big opponent (CoachEvents' own rule for a big game), 0 otherwise.
@@ -202,16 +240,3 @@ func _importance() -> int:
 	if kind.begins_with("nat_"):
 		return 2
 	return 1 if kind.begins_with("conf_") or CoachEvents.big_game(c) else 0
-
-func _sim() -> void:
-	if busy:
-		return
-	Game.dialog("SIM THIS GAME?", "The game is decided from the ratings. You won't play it.", [
-		["SIM IT", func():
-			if busy or not c.has_game():
-				return
-			busy = true
-			c.last_summary = c.sim_my_game()
-			Game.save_career()
-			Game.goto("game_summary"), "primary"],
-		["CANCEL", Callable(), "ghost"]])

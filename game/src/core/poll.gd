@@ -9,6 +9,7 @@ class_name Poll
 ## after the conference finals is the SELECTION poll the NCSA Championship's at-large bids come
 ## from) and after the NCSA final (the FINAL poll, next season's preseason). Each poll keeps
 ## everyone's place, so the screen shows the previous rank and the movement.
+## Every poll then keeps the Big Four in the Top 4 (see protect_big_four).
 ## A poll: {wk: week index it follows (-1 preseason), kind, label, ranks: [ids, best first],
 ## pts: [scores, the same order], rec: [[w, l, cw, cl], the same order]}.
 
@@ -40,7 +41,7 @@ static func preseason(c: Career) -> void:
 		if int(fp.year) == c.year - 1:
 			prior = (fp.ranks as Array).filter(func(id): return c.teams.has(id))
 	if prior.size() != c.teams.size():
-		prior = hierarchy(c.teams)
+		prior = protect_big_four(hierarchy(c.teams), [], -1)   # a new career: no Big Four team beaten yet
 	c.season["poll_prior"] = prior
 	var polls: Array = []
 	c.season["polls"] = polls
@@ -127,9 +128,50 @@ static func make(teams: Dictionary, rounds: Array, upto: int, prior: Array, prev
 	for id in teams:
 		var pr := prior_points(int(prior_rank.get(id, teams.size())), teams.size())
 		total[id] = lerpf(float(sc[id].score), pr, pw)
-	var ids := order(teams, total, sc)
+	var ids := protect_big_four(order(teams, total, sc), rounds, upto)
 	return {"ranks": ids, "pts": ids.map(func(id): return Career._whole(snappedf(total[id], 0.1))),
 		"rec": ids.map(func(id): return sc[id].rec)}
+
+## THE BIG FOUR: the four dominant programs keep their Top 4 places. A Big Four team that has
+## lost only to the other three this season is PROTECTED: it is in the Top 4 whatever its score.
+## One beaten by a school outside the Big Four loses that protection, and its place opens: it goes
+## to the best-ranked (by the normal order) of the unprotected Big Four teams and the outside
+## schools that have beaten a Big Four team. No other school reaches the Top 4: a record, schedule,
+## score or title never earns a place on its own. Inside the Top 4, and from #5 down, the normal
+## order stands. Worked out from the season's results every poll, so nothing extra is saved; the
+## preseason poll is last season's final one as it stood (its giant killers keep their places until
+## the first poll of the new season).
+const BIG_FOUR := ["CULA", "CUSC", "STAM", "ALC"]
+const BIG_TOP := 4
+
+static func protect_big_four(ids: Array, rounds: Array, upto: int) -> Array:
+	var big: Array = BIG_FOUR.filter(func(id): return id in ids)
+	if big.is_empty():
+		return ids
+	var res := results(rounds, upto)
+	var giant_killers := {}   # outside schools that have beaten a Big Four team
+	var protected: Array = []
+	for b in big:
+		var beaten := false
+		for e in res.get(b, []):
+			if not e.won and not e.o in BIG_FOUR:
+				beaten = true
+				giant_killers[e.o] = true
+		if not beaten:
+			protected.append(b)
+	var open := mini(BIG_TOP, ids.size()) - protected.size()
+	var top: Array = protected.duplicate()
+	for id in ids:   # best first
+		if open <= 0:
+			break
+		if id in protected:
+			continue
+		if id in big or giant_killers.has(id):
+			top.append(id)
+			open -= 1
+	var out: Array = ids.filter(func(id): return id in top)   # the Top 4 in the normal order
+	out.append_array(ids.filter(func(id): return not id in top))
+	return out
 
 ## Best first: the score, then head to head, quality wins and strength of schedule (`sc`'s).
 static func order(teams: Dictionary, total: Dictionary, sc: Dictionary) -> Array:

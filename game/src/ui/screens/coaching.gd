@@ -1,6 +1,7 @@
 extends BaseScreen
 ## COACHING: two panels side by side. PICK YOUR DEFENSE (left): the four drops (DefenseFormation.
-## DROPS), one picked at a time, its description, ACTIVE GAMEPLAN and SCOUT OPPONENT. The pick is
+## DROPS), one picked at a time, its description, its playbook diagram (PlayDiagram: the drop's
+## X's and O's, still) and SCOUT OPPONENT. The pick is
 ## Career.gameplan, saved the moment it's made; every match copies it at kick-off (MatchFlow.
 ## set_gameplan) and nothing in a match writes it back. PRESS isn't here: it's always on the bar.
 ## RECRUITING (right): OPEN RECRUITING (the market: Recruiting), this season's signings (X / 4),
@@ -12,10 +13,21 @@ const GAP := 6
 const DROP_H := 26
 const BIG_BTN_H := 30
 const TARGET_H := 30
-const DESC_H := 40          # the description's room (three lines, the longest), so nothing jumps
+const DESC_H := 20          # the description's room (two lines, the longest), so nothing jumps
+const PLAYBOOK_MIN_H := 60
+const PlayDiagram := preload("res://src/ui/play_diagram.gd")
+
+func _init() -> void:
+	detail = true   # (the playbook's arrows: drawn in the window's own pixels, finer than the rest)
 
 func _ready() -> void:
 	back_target = "hub"
+	if c == null:
+		c = Game.career
+	if c != null and c.is_eliminated():
+		# SEASON OVER: no next opponent to plan or scout for; the market instead (as the hub's RECRUITING)
+		Game.goto.call_deferred("recruiting", {"tab": "MARKET"}, false)
+		return
 	build_compact("COACHING")
 	_render()
 
@@ -51,11 +63,14 @@ func _defense() -> Control:
 	desc.custom_minimum_size = Vector2(0, DESC_H)
 	desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_child(desc)
-	var active := UI.label("ACTIVE GAMEPLAN: %s" % DefenseFormation.NAMES[c.gameplan], 8, UI.GOLD, "caps")
-	active.name = "ActiveGameplan"
-	v.add_child(active)
-	v.add_child(UI.spacer(0, 0, true))
-	var scout := _gold_button("SCOUT OPPONENT", func(): Game.goto("scout"), true)
+	var book: Control = PlayDiagram.new()
+	book.name = "Playbook"
+	book.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	book.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	book.custom_minimum_size = Vector2(0, PLAYBOOK_MIN_H)
+	book.setup(c.gameplan)
+	v.add_child(book)
+	var scout := _gold_button("SCOUT OPPONENT", func(): ScoutReveal.scout(), true)   # (the garage door first: ScoutReveal)
 	scout.name = "ScoutOpponent"
 	v.add_child(scout)
 	return p
@@ -104,7 +119,7 @@ func _recruiting() -> Control:
 		var none := UI.label("NO RECRUITS SIGNED YET", 8, UI.DIM, "caps")
 		none.name = "NoTargets"
 		list.add_child(none)
-	for r in c.incoming.slice(0, 3):
+	for r in c.incoming.slice(0, Recruiting.SIGN_MAX):   # (every signing: up to the four allowed)
 		list.add_child(_target(r))
 	v.add_child(UI.spacer(0, 0, true))
 	return p
@@ -135,15 +150,16 @@ func _target(r: Dictionary) -> Control:
 func _gold_button(t: String, cb: Callable, scope: bool = false, arrow: bool = false) -> Control:
 	var b := Deck.card(Vector2(0, BIG_BTN_H), func(ci, r, mode):
 		var w := floorf(r.size.x)
-		Deck.frame(ci, Rect2(0, 0, w, BIG_BTN_H), UI.GOLD.lightened(0.15) if mode == "hover" else UI.GOLD, UI.BORDER, true)
+		var face := Deck.button_face(ci, Rect2(0, 0, w, BIG_BTN_H), UI.GOLD, UI.BORDER, mode)
 		var tw := Deck.text_w(t, 20, "big") + (16.0 if scope else 0.0) + (14.0 if arrow else 0.0)
-		var x := floorf((w - tw) * 0.5)
+		var x := floorf(face.position.x + (w - tw) * 0.5)
+		var my := face.position.y + BIG_BTN_H * 0.5
 		if scope:
-			_binoculars(ci, Vector2(x, BIG_BTN_H * 0.5 - 4))
+			_binoculars(ci, Vector2(x, my - 4))
 			x += 16.0
-		Deck.text(ci, x, BIG_BTN_H * 0.5, t, 20, UI.INK, "big")
+		Deck.text(ci, x, my, t, 20, UI.INK, "big")
 		if arrow:
-			_arrow(ci, Vector2(x + Deck.text_w(t, 20, "big") + 6.0, BIG_BTN_H * 0.5)), cb)
+			_arrow(ci, Vector2(x + Deck.text_w(t, 20, "big") + 6.0, my)), cb)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return b
 

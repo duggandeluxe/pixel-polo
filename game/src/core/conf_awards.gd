@@ -29,7 +29,7 @@ class_name ConfAwards
 ## POTW is the best overall week of all (the one shared score); OPOTW goes to the best attacker
 ## among everybody else, so its winner never outranks POTW's on that score.
 ## The All-Tournament awards (TourneyAwards) use the same scores on a tournament's totals:
-##   pot / opot as potw / opotw; dpot as dpotw, but a field player's defending counts there too
+##   pot / opot as potw / opotw (pot also TEAM_WIN a game his team won); dpot as dpotw, but a field player's defending counts there too
 ##   (6 steal, 6 block, -3 exclusion committed, -4 penalty committed).
 ## Ties: the award's main stats, then fewer turnovers and exclusions, games played, then the
 ## lower player id (always the same answer).
@@ -47,15 +47,19 @@ class_name ConfAwards
 ##      keeper left is DPOTW whatever his week, the best freshman left ROTW.
 ## An award nobody can be given (the only keeper who played is POTW) stays empty: never a
 ## duplicate, never a field player for DPOTW. Old weeks stay as they were decided.
+## No sweeps: a school wins at most MAX_PER_TEAM of a conference-week's four (and of a
+## tournament's three, TourneyAwards); the next best man from another school takes the rest.
 
 const CATS := ["potw", "rotw", "opotw", "dpotw"]
 ## The order a week's awards are given in (a player only ever gets the first he's best for).
 const PICK_ORDER := ["potw", "opotw", "dpotw", "rotw"]
+## The most of one conference-week's (or one tournament's) awards one school can win.
+const MAX_PER_TEAM := 2
 const TITLES := {"potw": "PLAYER OF THE WEEK", "rotw": "ROOKIE OF THE WEEK",
 	"opotw": "OFFENSIVE PLAYER OF THE WEEK", "dpotw": "DEFENSIVE PLAYER OF THE WEEK"}
 const SHORT := {"potw": "POTW", "rotw": "ROTW", "opotw": "OPOTW", "dpotw": "DPOTW"}
 ## The tabs' order: PEC, GCC, WWPC, NCC, AWPC (Colleges.CONFERENCES' own order).
-const CONF_ORDER := ["MPSF", "BIGWEST", "WCC", "NWPC", "MAWPC", "WWPA", "SCIAC", "MPSFE"]
+const CONF_ORDER := ["MPSF", "BIGWEST", "WCC", "NWPC", "MAWPC"]
 
 const KEEPER_SAVE := 2.5     # (ROTW's and the tournaments' keeper scale)
 const KEEPER_GA := 2.0
@@ -76,18 +80,31 @@ const PARTICIPATION := 0.5   # a week's score over (1 - this) + this x games pla
 ## run to about 11 goals a side, simulated ones about 16.5 (--test sim_stats_measure), so without
 ## it your players' scoring could never compete. A touch under that gap: a lift, not a bonus.
 const PLAYED_GOALS := 1.45
+## PLAYER OF THE TOURNAMENT's team success (the Postseason Awards update): each tournament game his
+## team won while he played ("tw" in TourneyAwards' totals) is worth a steal. A lean toward the
+## teams that went deep, never a rule: a great tournament on a team out in the semis still wins it.
+const TEAM_WIN := 4.0
 
 # ------------------------------------------------------------------ deciding a week
 ## Decides the week just finished (every game of it played): each conference's four, once
 ## ("year:week" in Career.awards_done). Returns the records made ([] if already decided).
+## Regular-season weeks only (the round's own kind, Schedule.is_playoff, never a week number): a
+## conference or NCSA tournament round adds to its tournament's totals and, after its final, names
+## that tournament's honours (TourneyAwards), but no weekly award. Weeks already decided in older
+## saves stay as they were.
 static func decide_week(c: Career) -> Array:
 	var key := "%d:%d" % [c.year, c.week]
 	if key in c.awards_done or c.phase != "season" or c.week >= c.schedule.size():
 		return []
 	c.awards_done.append(key)
 	TourneyAwards.add_week(c)   # (a playoff round: its lines into its tournament's totals, this once)
-	var label := week_label(c, c.week)
 	var made: Array = []
+	if Schedule.is_playoff(c.schedule[c.week]):
+		# (the Postseason Awards update) the weekly awards are the regular season's: a playoff round
+		# names nobody of the week, only its tournament's own honours once its final is played
+		TourneyAwards.decide(c)
+		return made
+	var label := week_label(c, c.week)
 	for conf in CONF_ORDER:
 		var lines := _lines(c, conf)
 		if lines.is_empty():
@@ -96,7 +113,7 @@ static func decide_week(c: Career) -> Array:
 		if measure != null:
 			measure.append({"lines": lines, "pick": week.keys(), "gk_potw": week.has("potw") and (week.potw.p as PoloPlayer).is_keeper(),
 				"ids": week.values().map(func(x): return (x.p as PoloPlayer).id),
-				"fresh": lines.filter(func(x): return (x.p as PoloPlayer).year == 1).size(),
+				"fresh": lines.filter(func(x): return WalkOns.is_rookie(x.p as PoloPlayer)).size(),
 				"gks": lines.filter(func(x): return (x.p as PoloPlayer).is_keeper()).size()})
 		for cat in PICK_ORDER:
 			var e: Dictionary = week.get(cat, {})
@@ -117,18 +134,33 @@ static func pick_week(lines: Array) -> Dictionary:
 		return out
 	out["potw"] = potw
 	var rest := lines.filter(func(e): return (e.p as PoloPlayer).id != (potw.p as PoloPlayer).id)
-	out.merge(_allocate(rest))
+	out.merge(_allocate(rest, {String(potw.team): 1}))
 	return out
 
-## OPOTW, DPOTW and ROTW from `lines`, distinct winners: of every way to give them from each
-## category's best few (ALLOC_TOP: enough, since each winner can only take one man from the
-## others), the one that gives the most awards, then OPOTW its best man, then DPOTW, then ROTW.
-const ALLOC_TOP := 4
+## OPOTW, DPOTW and ROTW from `lines`, distinct winners, no school past MAX_PER_TEAM (counting
+## `taken`, {team: awards already won this week}): of every way to give them from each category's
+## best few (ALLOC_TOP, at most ALLOC_PER_TEAM of one school: enough, since the others can only
+## take two men or fill two schools), the one that gives the most awards, then the three as near
+## their own best as they can be, then OPOTW its best man, then DPOTW, then ROTW.
+const ALLOC_TOP := 8
+const ALLOC_PER_TEAM := 3
 const REST := ["opotw", "dpotw", "rotw"]
-static func _allocate(lines: Array) -> Dictionary:
+static func _allocate(lines: Array, taken := {}) -> Dictionary:
 	var ranked := {}
 	for cat in REST:
-		ranked[cat] = _ranked(lines, cat).slice(0, ALLOC_TOP)
+		var short: Array = []
+		var per := {}
+		var rank := 0
+		for x in _ranked(lines, cat):
+			var tm := String(x.team)
+			if int(per.get(tm, 0)) < ALLOC_PER_TEAM:
+				per[tm] = int(per.get(tm, 0)) + 1
+				x["rank"] = rank
+				short.append(x)
+				if short.size() >= ALLOC_TOP:
+					break
+			rank += 1
+		ranked[cat] = short
 	var best: Array = []
 	var best_key: Array = []
 	for i in (ranked.opotw as Array).size() + 1:
@@ -136,20 +168,28 @@ static func _allocate(lines: Array) -> Dictionary:
 			for k in (ranked.rotw as Array).size() + 1:
 				var pick := [i, j, k]
 				var ids := {}
+				var teams: Dictionary = taken.duplicate()
 				var ok := true
 				var n := 0
+				var places := [0, 0, 0]
 				for c in 3:
 					var list: Array = ranked[REST[c]]
 					if pick[c] < list.size():
-						var pid: int = (list[pick[c]].p as PoloPlayer).id
-						ok = ok and not ids.has(pid)
+						var e: Dictionary = list[pick[c]]
+						var pid: int = (e.p as PoloPlayer).id
+						var tm := String(e.team)
+						teams[tm] = int(teams.get(tm, 0)) + 1
+						ok = ok and not ids.has(pid) and int(teams[tm]) <= MAX_PER_TEAM
 						ids[pid] = true
+						places[c] = int(e.rank)
 						n += 1
+					else:
+						places[c] = 1000   # (not given: behind any man who could have it)
 				if not ok:
 					continue
 				# more awards first, then the three as near their best as they can all be (the lowest
 				# total of their places), then OPOTW's place, DPOTW's, ROTW's (lower is better)
-				var key := [n, -(i + j + k), -i, -j, -k]
+				var key := [n, -(places[0] + places[1] + places[2]), -places[0], -places[1], -places[2]]
 				if best.is_empty() or _ahead(key, best_key):
 					best = pick
 					best_key = key
@@ -157,7 +197,9 @@ static func _allocate(lines: Array) -> Dictionary:
 	for c in 3:
 		var list: Array = ranked[REST[c]]
 		if not best.is_empty() and best[c] < list.size():
-			out[REST[c]] = list[best[c]]
+			var e: Dictionary = list[best[c]]
+			e.erase("rank")
+			out[REST[c]] = e
 	return out
 
 ## "WEEK 3", or the round's name in the playoffs ("CONF SEMIS").
@@ -210,7 +252,7 @@ static func _ranked(lines: Array, cat: String) -> Array:
 static func eligible(p: PoloPlayer, ln: Dictionary, cat: String) -> bool:
 	match cat:
 		"rotw":
-			return p.year == 1
+			return WalkOns.is_rookie(p)   # (a freshman, or a walk-on in his first season here)
 		"dpotw":
 			return p.is_keeper()
 		"opotw":
@@ -263,6 +305,8 @@ static func score(p: PoloPlayer, ln: Dictionary, cat: String) -> float:
 				return 0.0   # (the weekly award is a goalkeeper's)
 			else:
 				raw = 6.0 * v.call("st") + 6.0 * v.call("bl") - 3.0 * v.call("ex") - 4.0 * v.call("pf5")
+	if cat == "pot":
+		raw += TEAM_WIN * v.call("tw")   # (the tournament's games his team won with him in the water)
 	var gp := maxf(1.0, v.call("gp"))
 	return raw / ((1.0 - PARTICIPATION) + PARTICIPATION * gp)
 
@@ -292,15 +336,20 @@ static func _record(c: Career, e: Dictionary, cat: String, conf: String, label: 
 static func of(c: Career, year: int, week: int, conf: String) -> Dictionary:
 	var out := {}
 	for a in c.conf_awards:
-		if int(a.year) == year and int(a.week) == week and String(a.conf) == conf:
+		if int(a.year) == year and int(a.week) == week and String(a.conf) == conf and not bool(a.get("hist", false)):
 			out[String(a.cat)] = a
 	return out
 
-## The weeks decided, oldest first: [[year, week, label, season], ...].
-static func weeks(c: Career) -> Array:
+## The awards this dynasty has actually given (Legacy's made-up seasons before it, "hist", left out).
+static func earned(c: Career) -> Array:
+	return c.conf_awards.filter(func(a): return not bool(a.get("hist", false)))
+
+## The weeks decided, oldest first: [[year, week, label, season], ...]. earned_only: this
+## dynasty's own weeks (the Conference Awards screen), not Legacy's past seasons.
+static func weeks(c: Career, earned_only := false) -> Array:
 	var seen := {}
 	var out: Array = []
-	for a in c.conf_awards:
+	for a in (earned(c) if earned_only else c.conf_awards):
 		var k := "%d:%d" % [int(a.year), int(a.week)]
 		if not seen.has(k):
 			seen[k] = true

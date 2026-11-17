@@ -8,8 +8,8 @@ extends RefCounted
 ## Where room is short (the scoreboard): the place, or the whole name for the three in Los Angeles.
 const SHORT := {
 	"CULA": "Los Angeles Bears", "CUSC": "Los Angeles Spartans", "LMMU": "Los Angeles Mountain Lions",
-	"STAM": "Stanford", "ALC": "Berkeley", "FORDU": "Bronx", "SJCU": "San Jose", "LBSC": "Long Beach",
-	"CUSD": "San Diego", "PRIN": "Princeton", "PPCU": "Malibu", "UCDS": "Davis", "ICU": "Irvine",
+	"STAM": "Pacific Grove", "ALC": "Bayview", "FORDU": "Bronx", "SJCU": "San Jose", "LBSC": "Long Beach",
+	"CUSD": "San Diego", "PRIN": "New Jersey", "PPCU": "Malibu", "UCDS": "Davis", "ICU": "Irvine",
 	"CRBU": "Riverside", "UPAC": "Stockton", "HVRD": "Cambridge", "CCSB": "Santa Barbara", "NANA": "Annapolis",
 	"BROW": "Providence", "GWU": "Washington", "SCCU": "Santa Clara", "USAF": "Colorado Springs",
 	"SMCC": "Moraga", "CSFU": "Fullerton", "BUCK": "Lewisburg", "WAGN": "Staten Island", "MSMU": "Emmitsburg",
@@ -18,25 +18,27 @@ const SHORT := {
 
 ## The new display names, exactly as the update lists them.
 const NAMES := {
-	"CULA": "Los Angeles Bears", "CUSC": "Los Angeles Spartans", "STAM": "Stanford Redwoods",
-	"ALC": "Berkeley Golden Grizzlies", "FORDU": "Bronx Lambs", "SJCU": "San Jose Warriors",
-	"LBSC": "Long Beach Barracudas", "CUSD": "San Diego Sea Kings", "PRIN": "Princeton Bengals",
+	"CULA": "Los Angeles Bears", "CUSC": "Los Angeles Spartans", "STAM": "Pacific Grove Redwoods",
+	"ALC": "Bayview Golden Grizzlies", "FORDU": "Bronx Lambs", "SJCU": "San Jose Warriors",
+	"LBSC": "Long Beach Barracudas", "CUSD": "San Diego Sea Kings", "PRIN": "New Jersey Bengals",
 	"PPCU": "Malibu Breakers", "UCDS": "Davis Mustangs", "ICU": "Irvine Aardvarks",
-	"CRBU": "Riverside Knights", "LMMU": "Los Angeles Mountain Lions", "UPAC": "Stockton Bengals",
+	"CRBU": "Riverside Knights", "LMMU": "Los Angeles Mountain Lions", "UPAC": "Stockton Scorpions",
 	"HVRD": "Cambridge Redhawks", "CCSB": "Santa Barbara Bulls", "NANA": "Annapolis Mariners",
-	"BROW": "Providence Grizzlies", "GWU": "Washington Patriots", "SCCU": "Santa Clara Stallions",
+	"BROW": "Providence Grizzlies", "GWU": "Washington Sentinels", "SCCU": "Santa Clara Stallions",
 	"USAF": "Colorado Springs Skyhawks", "SMCC": "Moraga Highlanders", "CSFU": "Fullerton Mammoths",
 	"BUCK": "Lewisburg Buffalo", "WAGN": "Staten Island Hawks", "MSMU": "Emmitsburg Highlanders",
 	"IONA": "New Rochelle Irish", "LIUB": "Brooklyn Hammerheads", "HURST": "Erie Lakehawks",
 }
 
 ## Every school as it was before the update: [old name, mascot, c1, c2, c3, conference, OVR,
-## OFF, DEF, prestige, logo mark, logo style]. All but the name must still match.
+## OFF, DEF, prestige, logo mark, logo style]. All but the name must still match. (The Redwoods'
+## and Golden Grizzlies' marks are their November 2026 rebrand's: PG and BV; the Bengals', NJ.) Stockton and
+## Washington keep their ids, marks and ratings under new mascots (Scorpions, Sentinels).
 const BEFORE := {
 	"CULA": ["CULA Bears", "Bears", "2d68c4", "f2a900", "", "MPSF", 91, 90, 92, 90, "LA", "interlock"],
 	"CUSC": ["CUSC Spartans", "Spartans", "990000", "ffc72c", "", "MPSF", 90, 92, 88, 88, "SC", "interlock"],
-	"STAM": ["STAM Redwoods", "Redwoods", "8c1515", "ffffff", "", "MPSF", 89, 87, 91, 86, "S", "block"],
-	"ALC": ["ALC Golden Grizzlies", "Golden Grizzlies", "003262", "fdb515", "", "MPSF", 88, 90, 86, 84, "A", "shield"],
+	"STAM": ["STAM Redwoods", "Redwoods", "8c1515", "ffffff", "", "MPSF", 89, 87, 91, 86, "PG", "interlock"],
+	"ALC": ["ALC Golden Grizzlies", "Golden Grizzlies", "003262", "fdb515", "", "MPSF", 88, 90, 86, 84, "BV", "interlock"],
 	"LBSC": ["LBSC Barracudas", "Barracudas", "111111", "ffc72a", "", "BIGWEST", 82, 84, 80, 71, "LB", "interlock"],
 	"CUSD": ["CUSD Sea Kings", "Sea Kings", "182b49", "c69214", "", "BIGWEST", 81, 80, 82, 69, "SD", "interlock"],
 	"ICU": ["ICU Aardvarks", "Aardvarks", "0064a4", "ffd200", "", "BIGWEST", 78, 77, 79, 63, "I", "circle"],
@@ -47,18 +49,18 @@ const BEFORE := {
 	"PPCU": ["PPCU Breakers", "Breakers", "00205c", "e35205", "", "WCC", 79, 81, 77, 65, "P", "circle"],
 	"UCDS": ["UCDS Mustangs", "Mustangs", "022851", "ffbf00", "", "WCC", 78, 76, 80, 63, "D", "shield"],
 	"LMMU": ["LMMU Mountain Lions", "Mountain Lions", "a6192e", "00205b", "", "WCC", 77, 78, 76, 61, "L", "angled"],
-	"UPAC": ["UPAC Bengals", "Bengals", "f47920", "121212", "", "WCC", 76, 76, 76, 59, "P", "angled"],
+	"UPAC": ["UPAC Bengals", "Scorpions", "f47920", "121212", "", "WCC", 76, 76, 76, 59, "P", "angled"],
 	"SCCU": ["SCCU Stallions", "Stallions", "b30738", "ffffff", "", "WCC", 72, 72, 72, 51, "S", "circle"],
 	"USAF": ["USAF Skyhawks", "Skyhawks", "003594", "b2b4b2", "", "WCC", 71, 74, 68, 49, "AF", "interlock"],
 	"SMCC": ["SMCC Highlanders", "Highlanders", "d80024", "06315b", "", "WCC", 70, 70, 70, 47, "M", "angled"],
 	"FORDU": ["FORDU Lambs", "Lambs", "860038", "ffffff", "", "MAWPC", 86, 88, 84, 80, "F", "block"],
 	"NANA": ["NANA Mariners", "Mariners", "00205b", "c5b783", "", "MAWPC", 74, 76, 72, 55, "N", "block"],
-	"GWU": ["GWU Patriots", "Patriots", "e4cc94", "033c5a", "", "MAWPC", 73, 72, 74, 53, "GW", "interlock"],
+	"GWU": ["GWU Patriots", "Sentinels", "e4cc94", "033c5a", "", "MAWPC", 73, 72, 74, 53, "GW", "interlock"],
 	"BUCK": ["BUCK Buffalo", "Buffalo", "e87722", "003865", "", "MAWPC", 69, 69, 69, 44, "B", "block"],
 	"WAGN": ["WAGN Hawks", "Hawks", "006747", "ffffff", "", "MAWPC", 68, 70, 66, 42, "W", "block"],
 	"MSMU": ["MSMU Highlanders", "Highlanders", "003a70", "ffffff", "", "MAWPC", 67, 67, 67, 40, "M", "shield"],
 	"HURST": ["HURST Lakehawks", "Lakehawks", "00573f", "ffffff", "", "MAWPC", 62, 63, 61, 30, "H", "circle"],
-	"PRIN": ["PRIN Bengals", "Bengals", "e77500", "121212", "", "NWPC", 80, 82, 78, 67, "P", "shield"],
+	"PRIN": ["PRIN Bengals", "Bengals", "e77500", "121212", "", "NWPC", 80, 82, 78, 67, "NJ", "interlock"],
 	"HVRD": ["HVRD Redhawks", "Redhawks", "a51c30", "ffffff", "", "NWPC", 76, 77, 75, 59, "H", "shield"],
 	"BROW": ["BROW Grizzlies", "Grizzlies", "4e3629", "c00404", "ffffff", "NWPC", 74, 74, 74, 55, "B", "shield"],
 	"IONA": ["IONA Irish", "Irish", "6f2c3f", "f2a900", "", "NWPC", 66, 68, 64, 38, "I", "block"],
@@ -76,6 +78,10 @@ func run(runner) -> void:
 	_new_career()
 	_los_angeles()
 	_old_save()
+	_rebrand_save()
+	_bengals_save()
+	_bengals_logo()
+	_mascot_save()
 	await _old_slot()
 	_no_effect_on_play()
 	_fits()
@@ -193,6 +199,109 @@ func _old_save() -> void:
 	# saved again, it stays renamed
 	var again := Career.from_dict(JSON.parse_string(JSON.stringify(old.to_dict())))
 	r.check(again.team().name == "Brooklyn Hammerheads" and JSON.stringify(again.to_dict()) == JSON.stringify(old.to_dict()), "saved and loaded again, nothing changes")
+
+## The November 2026 rebrand: a save from before it (Stanford Redwoods, Berkeley Golden Grizzlies)
+## loads as the same career, those two teams under their new names, nothing duplicated or lost.
+func _rebrand_save() -> void:
+	var c := Career.new_game("STAM", "A", "B", 52)
+	for _i in 2:
+		while c.has_game():
+			c.sim_my_game()
+		c.end_week()
+	var d: Dictionary = JSON.parse_string(JSON.stringify(c.to_dict()))
+	d.teams.STAM.name = "Stanford Redwoods"
+	d.teams.ALC.name = "Berkeley Golden Grizzlies"
+	d.news.push_front({"t": "Stanford Redwoods beat Berkeley Golden Grizzlies 8-7", "y": d.year, "w": d.week})
+	d.records.ncsa["game_team_goals"] = {"v": 30, "name": "Stanford Redwoods", "team": "STAM", "year": "2026-27"}
+	var old := Career.from_dict(d)
+	r.check(old.school == "STAM" and old.team().name == "Pacific Grove Redwoods", "a Stanford Redwoods career loads as the Pacific Grove Redwoods")
+	r.check(old.teams.ALC.name == "Bayview Golden Grizzlies" and old.teams.size() == c.teams.size(), "...the Berkeley Golden Grizzlies as the Bayview Golden Grizzlies, no team added or lost")
+	r.check(old.news[0].t == "Pacific Grove Redwoods beat Bayview Golden Grizzlies 8-7", "...in the news (%s)" % old.news[0].t)
+	r.check(old.records.ncsa.game_team_goals.name == "Pacific Grove Redwoods" and old.records.ncsa.game_team_goals.team == "STAM", "...and in the record books")
+	for id in ["STAM", "ALC"]:
+		var a: PoloTeam = c.teams[id]
+		var b: PoloTeam = old.teams[id]
+		r.check(JSON.stringify(a.to_dict().roster) == JSON.stringify(b.to_dict().roster) and a.c1 == b.c1 and a.c2 == b.c2 and a.conf == b.conf and a.rating() == b.rating(),
+			"%s keeps its roster, colours, conference and ratings" % id)
+	r.check(old.record_text() == c.record_text() and old.schedule == c.schedule and old.table == c.table, "...the same record, schedule and table")
+
+## The New Jersey Bengals rebrand: a whole season played as the Princeton Bengals (the name, its
+## capitals and the place alone in the news, the league news, the inbox and the record books)
+## loads as exactly the career it would be now: same id, roster, ratings, NCC place, recruiting,
+## schedule and table, no team added. Players from Princeton, New Jersey keep their hometown.
+func _bengals_save() -> void:
+	var c := Career.new_game("PRIN", "A", "B", 61)
+	for _i in 40:
+		if c.phase != "season":
+			break
+		while c.has_game():
+			c.sim_my_game()
+		c.end_week()
+	var now := JSON.stringify(c.to_dict())
+	var text := now.replace("New Jersey Bengals", "Princeton Bengals").replace("NEW JERSEY BENGALS", "PRINCETON BENGALS")
+	# (the place alone, never a state after a town: "Princeton, New Jersey" is a hometown)
+	text = RegEx.create_from_string("(?<!, )\\bNew Jersey\\b(?!,)").sub(text, "Princeton", true)
+	text = RegEx.create_from_string("(?<!, )\\bNEW JERSEY\\b(?!,)").sub(text, "PRINCETON", true)
+	r.check(text != now and "PRINCETON" in text, "a Princeton-era save has the old name in its text")
+	var old := Career.from_dict(JSON.parse_string(text))
+	var same := Career.from_dict(JSON.parse_string(now))
+	r.check(old.school == "PRIN" and old.team().name == "New Jersey Bengals" and old.teams.size() == same.teams.size(), "a Princeton Bengals career loads as the New Jersey Bengals, no team added or lost")
+	r.check(JSON.stringify(old.to_dict()) == JSON.stringify(same.to_dict()), "...and is exactly the same career, every word of its news and records moved on")
+	var left := RegEx.create_from_string("(?i)princeton(?!, )").search_all(JSON.stringify(old.to_dict()))
+	r.check(left.is_empty(), "...with no Princeton left but hometowns (%d)" % left.size())
+	var t: PoloTeam = old.teams.PRIN
+	r.check(t.conf == "NWPC" and Colleges.conf_abbr(t.conf) == "NCC" and t.c1 == Color("e77500") and t.c2 == Color("121212"), "the Bengals stay in the NCC in orange and black")
+	r.check(Colleges.place("PRIN") == "New Jersey" and Colleges.short_name(t) == "New Jersey" and Colleges.venue_name("PRIN") == "Bengal Basin Aquatics Complex", "the scoreboard says New Jersey; the home pool is kept")
+
+## The Bengal tiger head replaced the striped "B": every box has its file, centred in its box
+## (never wider or taller), in the tiger's own black, orange and cream, nothing in between.
+func _bengals_logo() -> void:
+	var team := {"short": "PRIN", "name": "New Jersey Bengals"}
+	var cols := {}
+	for tag in TeamLogo.ART_BOXES:
+		var box: Vector2i = TeamLogo.ART_BOXES[tag]
+		var fine: String = TeamLogo.FINE_TAGS.get(tag, "")
+		for f in ([false, true] if fine != "" else [false]):
+			var tex := TeamLogo.art(team, box, f)
+			var want := box if not f else Vector2i(roundi(box.x / TeamLogo.FINE), roundi(box.y / TeamLogo.FINE))
+			r.check(tex != null and tex.get_width() <= want.x and tex.get_height() <= want.y and (tex.get_width() == want.x or tex.get_height() == want.y),
+				"PRIN %s%s fills its box %s (%s)" % [tag, " fine" if f else "", str(want), str(tex.get_size()) if tex else "none"])
+			if tex == null:
+				continue
+			var img := tex.get_image()
+			for y in img.get_height():
+				for x in img.get_width():
+					var px := img.get_pixel(x, y)
+					if px.a > 0.0:
+						cols[px.to_html(true)] = true
+	r.check(cols.keys().all(func(k): return String(k).ends_with("ff")) and cols.size() == 3, "PRIN's logo is opaque black, orange and cream only %s" % str(cols.keys()))
+
+## The Stockton Scorpions and Washington Sentinels: a save from when they were the Bengals and the
+## Patriots loads as the same career, new names and mascots everywhere, the New Jersey Bengals untouched.
+func _mascot_save() -> void:
+	var c := Career.new_game("UPAC", "A", "B", 64)
+	for _i in 2:
+		while c.has_game():
+			c.sim_my_game()
+		c.end_week()
+	var d: Dictionary = JSON.parse_string(JSON.stringify(c.to_dict()))
+	d.teams.UPAC.name = "Stockton Bengals"
+	d.teams.UPAC.mascot = "Bengals"
+	d.teams.GWU.name = "Washington Patriots"
+	d.teams.GWU.mascot = "Patriots"
+	d.news.push_front({"t": "Stockton Bengals beat Washington Patriots 9-8; New Jersey Bengals idle", "y": d.year, "w": d.week})
+	d.records.ncsa["game_team_goals"] = {"v": 29, "name": "WASHINGTON PATRIOTS", "team": "GWU", "year": "2026-27"}
+	var old := Career.from_dict(d)
+	r.check(old.school == "UPAC" and old.team().name == "Stockton Scorpions" and old.team().mascot == "Scorpions", "a Stockton Bengals career loads as the Stockton Scorpions")
+	r.check(old.teams.GWU.name == "Washington Sentinels" and old.teams.GWU.mascot == "Sentinels", "...the Washington Patriots as the Washington Sentinels")
+	r.check(old.teams.PRIN.name == "New Jersey Bengals" and old.teams.PRIN.mascot == "Bengals" and old.teams.size() == c.teams.size(), "...the New Jersey Bengals untouched, no team added or lost")
+	r.check(old.news[0].t == "Stockton Scorpions beat Washington Sentinels 9-8; New Jersey Bengals idle", "...in the news (%s)" % old.news[0].t)
+	r.check(old.records.ncsa.game_team_goals.name == "WASHINGTON SENTINELS" and old.records.ncsa.game_team_goals.team == "GWU", "...and in the record books")
+	for id in ["UPAC", "GWU"]:
+		var a: PoloTeam = c.teams[id]
+		var b: PoloTeam = old.teams[id]
+		r.check(JSON.stringify(a.to_dict()) == JSON.stringify(b.to_dict()), "%s: roster, ratings, colours and conference exactly as saved" % id)
+	r.check(old.record_text() == c.record_text() and old.schedule == c.schedule and old.table == c.table, "...the same record, schedule and table")
 
 ## 10: a save slot written before the update shows the new name on the careers screen, from a
 ## summary cached before the update too, and loads.
@@ -396,9 +505,9 @@ func _screens() -> void:
 	var drawn: Array = UI.drawn_log
 	r.check(ms.flow.phase == MatchFlow.Phase.FINAL and breaks > 0, "a career game played to full time, with its breaks (%d)" % breaks)
 	r.check(Hud.fit_name(c.team(), Hud.NAME_MAX).lines == ["LOS ANGELES", "MOUNTAIN LIONS"], "the Los Angeles Mountain Lions on the scoreboard: place over mascot")
-	r.check(drawn.has("LOS ANGELES") and drawn.has("MOUNTAIN LIONS"), "...as drawn in the game")
+	r.check(drawn.has(Scoreboard.abbr(c.team())) and Scoreboard.tier() == 1, "...and, on the Classic board in the game, its abbreviation (%s)" % Scoreboard.abbr(c.team()))
 	r.check(drawn.any(func(s): return String(s).begins_with("END OF")), "the quarter-break card was drawn")
-	r.check(drawn.has(Colleges.short_name(c.opponent()).to_upper()), "the opponent by its short name on the scoreboard (%s)" % Colleges.short_name(c.opponent()))
+	r.check(drawn.has(Scoreboard.abbr(c.opponent())), "the opponent by its abbreviation on the Classic scoreboard (%s)" % Scoreboard.abbr(c.opponent()))
 	_scan(re, "match", bad)
 	ms._to_career()
 	UI.drawn_log = []

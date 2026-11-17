@@ -85,12 +85,7 @@ static func week(c: Career, ranks: Dictionary) -> Array:
 		if g.r == null:
 			continue
 		var w := Schedule.winner(g)
-		if String(g.get("k", "")) == "d3_final":
-			add.call("d3_champ", w, "%s WIN DIVISION III!" % _short(c, w),
-				"%s won the NCSA Division III Championship %s over %s." % [_name(c, w), Schedule.score_text(g, g.h == w), _name(c, g.a if w == g.h else g.h)])
-		elif g.has("k"):
-			continue
-		elif String(rd.kind) == "conf_final":
+		if String(rd.kind) == "conf_final":
 			add.call("conf_champ", w, "%s WIN THE %s!" % [_short(c, w), Colleges.conf_abbr((c.teams[w] as PoloTeam).conf)],
 				"%s are conference champions, %s over %s." % [_name(c, w), Schedule.score_text(g, g.h == w), _name(c, g.a if w == g.h else g.h)])
 		elif String(rd.kind) == "nat_final":

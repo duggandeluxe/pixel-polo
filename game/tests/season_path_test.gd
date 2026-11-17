@@ -24,7 +24,7 @@ func run(runner) -> void:
 	var g: Dictionary = c.my_game()
 	var opp: String = g.a if g.h == c.school else g.h
 	r.check(next.size() == 1 and next[0].opp == c.teams[opp] and next[0].head == "GAME 1", "T2: the next game is the one node in yellow, against %s" % opp)
-	r.check(_progress(scr) == "GAME 1 OF %d" % Schedule.team_games(c.schedule, c.school).size(), "T9: GAME 1 OF N, N from the schedule (%s)" % _progress(scr))
+	r.check(_progress(scr) == "01 / %d" % Schedule.team_games(c.schedule, c.school).size(), "T9: 01 / N beside the heading, N from the schedule (%s)" % _progress(scr))
 	r.check(JSON.stringify(c.schedule) == sched, "the schedule untouched by drawing it")
 	# T3: a game played
 	_play_week(c)
@@ -34,7 +34,7 @@ func run(runner) -> void:
 	var g1: Dictionary = Schedule.team_games(c.schedule, c.school)[0][1]
 	var won := Schedule.winner(g1) == c.school
 	r.check(done.state == ("win" if won else "loss") and done.big == ("W " if won else "L ") + Schedule.score_text(g1, g1.h == c.school), "T3: game 1 shows its result: %s" % done.big)
-	r.check(weeks.filter(func(d): return d.state == "next").size() <= 1 and _progress(scr).begins_with("GAME %d OF" % mini(Schedule.games_played(c.schedule, c.school) + 1, Schedule.team_games(c.schedule, c.school).size())), "T3/T17: NEXT moved on, the count with it (%s)" % _progress(scr))
+	r.check(weeks.filter(func(d): return d.state == "next").size() <= 1 and _progress(scr).begins_with("%02d / " % mini(Schedule.games_played(c.schedule, c.school) + 1, Schedule.team_games(c.schedule, c.school).size())), "T3/T17: NEXT moved on, the count with it (%s)" % _progress(scr))
 	# T4: the whole season, every game once, in order
 	var seen: Array = []
 	var order_ok := true
@@ -117,7 +117,7 @@ static func shots(runner, out: String) -> void:
 	c.queue.clear()
 	c.hot_tip = true
 	Game.career = c
-	var plan := [[3, "s1_week4"], [4, "s2_week8"], [3, "s3_late"], [0, "s4_playoffs"]]
+	var plan := [[3, "s1_week4"], [4, "s2_week8"], [3, "s3_late"], [0, "s4_playoffs"], [0, "s5_offseason"]]
 	for st in plan:
 		for _i in int(st[0]):
 			_play_week(c)
@@ -126,6 +126,18 @@ static func shots(runner, out: String) -> void:
 			while not (c.week < c.schedule.size() and Schedule.is_playoff(c.schedule[c.week])) and guard < 20:
 				guard += 1
 				_play_week(c)
+		if String(st[1]) == "s5_offseason":
+			var guard := 0
+			while not c.in_offseason() and guard < 40:
+				guard += 1
+				if c.is_eliminated():
+					c.sim_to_offseason()
+				else:
+					_play_week(c)
+			if not c.elim.is_empty():
+				c.elim["shown"] = true   # straight to the hub, not OH NO!
+			c.pending_event = {}
+			c.queue.clear()
 		for sz in [[Vector2i(1440, 810), ""], [Vector2i(1752, 810), "_wide"], [Vector2i(1080, 810), "_4x3"]]:
 			DisplayServer.window_set_size(sz[0])
 			await tree.create_timer(0.3).timeout

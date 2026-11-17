@@ -11,7 +11,7 @@ extends RefCounted
 ## gets a fixed template from its id, so a logo never changes between sessions.
 ## A school with drawn artwork (res://assets/logos/<id>_<box>.png, cut from the Road to Glory
 ## logo sheet by tools/logos/) shows that instead, one file per box size so it's never rescaled
-## off the pixel grid; a school without (Stanford keeps its letter) falls back to the template.
+## off the pixel grid; a team without (a quick-match club, a renamed team) falls back to the template.
 ## The list marks ("s", "m") are redrawn for their size: the logo's body and one ring of its trim.
 ## On a DETAIL MODE screen (Game.set_detail) a list mark is the same size but drawn finer: art pixels
 ## of FINE game pixels, two window pixels at the usual 3x, the pixel the rest of that mode's art uses.
@@ -159,13 +159,30 @@ static func draw_in(ci: CanvasItem, r: Rect2, t: Variant, dense: bool = true) ->
 	var dim := Vector2(tex.get_width(), tex.get_height()) * k
 	ci.draw_texture_rect(tex, Rect2((r.position + (r.size - dim) * 0.5).floor(), dim), false)
 
+## draw_in, but on a DETAIL MODE screen a big box (FINE_UNDER and up) takes the biggest artwork
+## file whose own pixels fit it in fine pixels (the 60 px file in a 40 px box): 1.5x the detail.
+## Small boxes, other screens and teams without artwork: draw_in as it is. `fill`: a small box
+## too (a portrait's well) takes the full artwork in fine pixels when one fits it.
+static func draw_fine_in(ci: CanvasItem, r: Rect2, t: Variant, fill: bool = false) -> void:
+	if (minf(r.size.x, r.size.y) < FINE_UNDER and not fill) or not detail_on(ci):
+		draw_in(ci, r, t)
+		return
+	var fit := Vector2i(int(r.size.x / FINE), int(r.size.y / FINE))
+	var tex := art_within(t, fit)
+	if tex == null or tex.get_width() > fit.x or tex.get_height() > fit.y:
+		draw_in(ci, r, t)
+		return
+	var dim := Vector2(tex.get_width(), tex.get_height()) * FINE
+	var at := r.position + (r.size - dim) * 0.5
+	ci.draw_texture_rect(tex, Rect2((at / FINE).floor() * FINE, dim), false)
+
 ## This canvas is in a detail mode window.
 static func detail_on(ci: CanvasItem) -> bool:
 	var win := ci.get_window()
 	return win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 
 ## A school's drawn logo for the biggest artwork box inside `fit`, or null (no artwork: the
-## quick-match clubs, Stanford, a renamed team).
+## quick-match clubs, a renamed team).
 static func art(t: Variant, fit: Vector2i, fine: bool = false) -> Texture2D:
 	var id := ""
 	var name := ""

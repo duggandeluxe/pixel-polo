@@ -14,6 +14,7 @@ func run(runner) -> void:
 	Game.career = null
 	await _layout()
 	await _toggles()
+	await _dev_access()
 	await _quarter_button()
 	_saves()
 	_matches()
@@ -44,15 +45,30 @@ func _inside(n: Control) -> bool:
 func _layout() -> void:
 	Game.settings.dev_mode = false
 	await _open()
-	var secs := ["Gameplay", "Audio", "Options", "ResetRow"]
-	r.check(secs.all(func(s): return _find(s) is PanelContainer), "1/2: four panels: GAMEPLAY, AUDIO & FEEDBACK, GAME OPTIONS, DANGER ZONE")
+	var secs := ["Gameplay", "Audio"]
+	r.check(secs.all(func(s): return _find(s) is PanelContainer), "1/2: two panels: GAMEPLAY, AUDIO & FEEDBACK")
 	var heads: Array = secs.map(func(s): return (_find(s).find_child("Heading", true, false) as Label).text)
-	r.check(heads == ["GAMEPLAY", "AUDIO & FEEDBACK", "GAME OPTIONS", "DANGER ZONE"], "1: their headings %s" % str(heads))
+	r.check(heads == ["GAMEPLAY", "AUDIO & FEEDBACK"], "1: their headings %s" % str(heads))
+	r.check(_find("Options") == null and _find("ResetRow") == null and _find("ResetGame") == null and _find("Toggle_dev_mode") == null and _find("DevTools") == null,
+		"DEV: no GAME OPTIONS, DANGER ZONE, Developer Mode or tools on Settings")
 	var g: Control = _find("Gameplay")
 	var a: Control = _find("Audio")
 	r.check(absf(g.global_position.y - a.global_position.y) < 1.0 and a.global_position.x > g.global_position.x + g.size.x, "2: GAMEPLAY and AUDIO side by side (two columns)")
-	var dz: Control = _find("ResetRow")
-	r.check(dz.global_position.y > g.global_position.y + g.size.y and _find("ResetGame") in dz.find_children("*", "Button", true, false), "8: RESET EVERYTHING in the DANGER ZONE, below and apart")
+	r.check(absf(g.size.y - a.size.y) < 0.5 and g.get_global_rect().end.y < 270.0 - 18.0,
+		"layout: both panels one height, tops aligned, sized to their content (no stretching to the page's bottom: %.0f)" % g.get_global_rect().end.y)
+	var snug := true
+	for pn in ["DifficultyPlate", "QuarterPlate", "Row_sfx", "Row_music", "Row_haptics", "Row_reduce_motion"]:
+		var pl := _find(pn) as Control
+		if pl == null or pl.size.y > pl.get_combined_minimum_size().y + 0.5:
+			snug = false
+	var rows: Array = ["sfx", "music", "haptics", "reduce_motion"].map(func(k): return _find("Row_" + k))
+	var gaps: Array = []
+	for i in 3:
+		gaps.append((rows[i + 1] as Control).global_position.y - (rows[i] as Control).get_global_rect().end.y)
+	r.check(snug and gaps.all(func(x): return absf(x - gaps[0]) < 1.01), "layout: every inner box fits its content; the audio rows evenly spaced %s" % str(gaps))
+	var db: Control = _find("DevButton")
+	r.check(db is Button and (db as Button).text == "DEV" and db.global_position.x > 400 and db.global_position.y < 24 and _inside(db)
+		and not db.get_global_rect().intersects(Game.current_screen.title_label.get_global_rect()), "DEV: a small DEV button at the top right, clear of the title")
 	var all_in := true
 	var bad: Array = []
 	for n in Game.current_screen.find_children("*", "Control", true, false):
@@ -75,15 +91,116 @@ func _layout() -> void:
 		"5: the picked difficulty in yellow, the others navy")
 	Game.settings.dev_mode = true
 	await _open()
+	r.check(_find("DevTools") == null and _find("CoachLab") == null, "39: Developer Mode on: still no developer tools on Settings")
+	await _open_dev()
 	var tools := ["FormLab", "TempoLab", "AttrLab", "HotLab", "FxLab", "DefenseLab", "RecordLab", "CoachLab"]
-	r.check(tools.all(func(t): return _find(t) is Button) and _find("DevTools") != null, "39: Developer Mode on: every developer tool, in its own panel")
+	r.check(tools.all(func(t): return _find(t) is Button) and _find("DevTools") != null, "39: Developer Mode on: every developer tool, in its own panel on the DEV screen")
+	Game.settings.dev_mode = false
+	await _open()
 	Game.current_screen.on_back()
 	await _frames()
 	r.check(Game.current_name == "title", "7: Back leaves Settings")
-	Game.settings.dev_mode = false
-	await _open()
+	await _open_dev()
 	r.check(_find("DevTools") == null and _find("CoachLab") == null, "39: off: no developer tools")
+	await _open()
 	r.check(Game.current_screen.get_window().content_scale_mode == Window.CONTENT_SCALE_MODE_VIEWPORT, "9: drawn as ever (the 480 x 270 image scaled up, sharp pixels)")
+
+## The DEV screen the way a player reaches it: Settings, DEV, the code.
+func _open_dev() -> void:
+	if Game.current_name != "settings":
+		await _open()
+	(_find("DevButton") as Button).pressed.emit()
+	await _frames(1)
+	var pad = _pad()
+	for d in "8008":
+		(pad.find_child("Key" + d, true, false) as Button).pressed.emit()
+	(pad.find_child("Unlock", true, false) as Button).pressed.emit()
+	await _frames()
+
+func _pad() -> Node:
+	return Game.overlay.get_node_or_null("DevPad")
+
+func _key(code: Key) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	Input.flush_buffered_events()
+
+# ------------------------------------------------------------------ DEVELOPER ACCESS
+func _dev_access() -> void:
+	DevGate.lock()
+	Game.goto("dev_settings")
+	await _frames()
+	r.check(Game.current_name == "settings", "DEV: straight to the DEV screen without the code: Settings instead")
+	(_find("DevButton") as Button).pressed.emit()
+	await _frames(1)
+	var pad = _pad()
+	r.check(pad != null and Game.current_name == "settings", "DEV: the DEV button opens the code popup, not the DEV screen")
+	var plate := pad.find_child("TitlePlate", true, false) as Control
+	r.check(plate != null and (plate.find_children("*", "Label", true, false)[0] as Label).text == "DEVELOPER ACCESS", "DEV: titled DEVELOPER ACCESS")
+	var keys := ["Key0", "Key1", "Key2", "Key3", "Key4", "Key5", "Key6", "Key7", "Key8", "Key9", "Backspace", "Cancel", "Unlock"]
+	r.check(keys.all(func(k): return pad.find_child(k, true, false) is Button), "DEV: 0-9, backspace, CANCEL and UNLOCK")
+	var texts: Array = pad.find_children("*", "Label", true, false).map(func(l): return (l as Label).text)
+	for b in pad.find_children("*", "Button", true, false):
+		texts.append((b as Button).text)
+	r.check(not texts.any(func(t): return String(t).contains("8008")), "DEV: the code is never shown")
+	for d in "123456":
+		(pad.find_child("Key" + d, true, false) as Button).pressed.emit()
+	r.check(pad.entered.length() == 4, "DEV: never more than four digits (%d)" % pad.entered.length())
+	(pad.find_child("Backspace", true, false) as Button).pressed.emit()
+	r.check(pad.entered == "123", "DEV: backspace takes one off")
+	(pad.find_child("Key9", true, false) as Button).pressed.emit()
+	(pad.find_child("Unlock", true, false) as Button).pressed.emit()
+	await _frames(1)
+	var st := pad.find_child("Status", true, false) as Label
+	r.check(st.text == "INCORRECT CODE" and st.get_theme_color("font_color") == Color("ff5a5a") and pad.entered == "" and Game.current_name == "settings" and not DevGate.is_open(),
+		"DEV: a wrong code: INCORRECT CODE in red, the digits cleared, no access")
+	# the keyboard
+	for k in [KEY_8, KEY_0, KEY_KP_0, KEY_9]:
+		_key(k)
+	r.check(pad.entered == "8009", "DEV: digits from the keyboard (and keypad) %s" % pad.entered)
+	_key(KEY_BACKSPACE)
+	r.check(pad.entered == "800", "DEV: Backspace from the keyboard")
+	var was: Dictionary = Game.settings.duplicate(true)
+	(pad.find_child("Cancel", true, false) as Button).pressed.emit()
+	await _frames(1)
+	r.check(_pad() == null and Game.current_name == "settings" and Game.settings == was and not DevGate.is_open(), "DEV: CANCEL closes it, nothing changed")
+	r.check(not DevGate.try_unlock("800") and not DevGate.try_unlock("80080") and not DevGate.try_unlock("") and not DevGate.try_unlock("abcd"), "DEV: only the exact code")
+	(_find("DevButton") as Button).pressed.emit()
+	await _frames(1)
+	pad = _pad()
+	for k in [KEY_8, KEY_0, KEY_0, KEY_8]:
+		_key(k)
+	(pad.find_child("Unlock", true, false) as Button).pressed.emit()
+	await _frames()
+	r.check(Game.current_name == "dev_settings" and _pad() == null, "DEV: the right code opens the DEV screen at once")
+	r.check(_find("Toggle_dev_mode") is Button and _find("ResetGame") is Button and _find("ResetRow") is PanelContainer and _find("ResetWarning") is Label,
+		"DEV: Developer Mode and the DANGER ZONE (RESET EVERYTHING, its warning) on the DEV screen")
+	var all_in := true
+	for n in Game.current_screen.find_children("*", "Control", true, false):
+		if n is Control and (n as Control).is_visible_in_tree() and (n is Button or n is PanelContainer) and not _inside(n):
+			all_in = false
+	r.check(all_in, "DEV: everything inside the screen")
+	# a lab and back keeps the session; Back to Settings ends it
+	Game.settings.dev_mode = true
+	Game.current_screen._refresh()
+	(_find("FormLab") as Button).pressed.emit()
+	await _frames()
+	Game.current_screen.on_back()
+	await _frames()
+	r.check(Game.current_name == "dev_settings", "DEV: a lab's Back returns to the DEV screen")
+	Game.settings.dev_mode = false
+	Game.current_screen.on_back()
+	await _frames()
+	r.check(Game.current_name == "settings" and not DevGate.is_open(), "DEV: Back returns to Settings and closes the session")
+	Game.goto("dev_settings")
+	await _frames()
+	r.check(Game.current_name == "settings", "DEV: reopening it asks for the code again")
+	DevGate.try_unlock("8008")
+	Game.goto("title")
+	await _frames()
+	r.check(not DevGate.is_open(), "DEV: leaving for the menus closes the session")
 
 # ------------------------------------------------------------------ 33-40
 func _toggles() -> void:
@@ -102,6 +219,7 @@ func _toggles() -> void:
 		await _frames(1)
 		r.check(Difficulty.mode(false) == m and (_find("DiffNote") as Label).text.begins_with(String(Game.current_screen.DIFF_NOTES[m]).substr(0, 20)), "33: %s picked, its note underneath" % m)
 	Difficulty.set_mode("normal")
+	await _open_dev()
 	var dev: bool = Game.settings.dev_mode
 	(_find("Toggle_dev_mode") as Button).pressed.emit()
 	await _frames(1)
@@ -111,10 +229,11 @@ func _toggles() -> void:
 	(_find("ResetGame") as Button).pressed.emit()
 	await _frames(1)
 	var dialogs := Game.overlay.get_children().filter(func(l): return l is Control and l.mouse_filter == Control.MOUSE_FILTER_STOP)
-	r.check(dialogs.size() == 1 and Game.current_name == "settings", "40: RESET EVERYTHING asks first (nothing reset yet)")
+	r.check(dialogs.size() == 1 and Game.current_name == "dev_settings", "40: RESET EVERYTHING asks first (nothing reset yet)")
 	for l in dialogs:
 		l.queue_free()
 	await _frames(1)
+	await _open()
 	# Reduce Motion: no pop
 	Game.test_mode = false
 	Game.settings.reduce_motion = true
@@ -275,6 +394,8 @@ func _match_start() -> void:
 	Game.current_name = ""
 	Game.career = null
 
+const DevPad := preload("res://src/ui/dev_pad.gd")
+
 static func shots(runner, out: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	var tree: SceneTree = runner.get_tree()
@@ -297,7 +418,20 @@ static func shots(runner, out: String) -> void:
 	Game.settings.difficulty = "dynamic"
 	c.difficulty = "dynamic"
 	Game.goto("settings")
-	await snap.call("s2_dev_career.png")
+	await snap.call("s2_career.png")
+	var pad = DevPad.open()
+	pad.add_digit("8")
+	pad.add_digit("0")
+	await snap.call("s3_dev_pad.png")
+	pad.unlock()
+	await snap.call("s4_dev_pad_wrong.png")
+	pad.cancel()
+	DevGate.try_unlock("8008")
+	Game.goto("dev_settings")
+	await snap.call("s5_dev_screen.png")
+	Game.settings.dev_mode = false
+	Game.current_screen._refresh()
+	await snap.call("s6_dev_screen_off.png")
 	Game.settings = kept
 	Game.career = null
 	print("  shots")

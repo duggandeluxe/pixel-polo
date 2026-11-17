@@ -5,7 +5,7 @@ extends RefCounted
 ##
 ##   DYNASTY  Career.credits: given and earned in a dynasty, saved with it, gone with it.
 ##   SHARED   Store.bank: coins that belong to no dynasty, in every career, never lost to a new or
-##            a deleted one: bought in the Yellow Coin Shop, converted from retired Blue Coins,
+##            a deleted one: bought in the Polo Points Shop, converted from retired Blue Coins,
 ##            refunds for retired items, Pixel Polo +'s grant (CoinVault.sources says which).
 ##
 ## Spending takes the dynasty's own first, then the shared ones, journaled against the career until

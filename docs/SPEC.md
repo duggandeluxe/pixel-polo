@@ -86,12 +86,15 @@ How I read your note: **players can't customize pools.** You make a few, and eac
 This is a straight port of Retro Swim's store, with water polo names.
 
 - **Products:**
-  - PIXEL POLO + (product id pro_unlock), $7.99 one-time: 500 Yellow Coins once, player name and
-    cap number customization, both division packs.
-  - Yellow Coin packs (ids blue_100/350/650/1400): 500 for $1.99, 1,750 for $5.99, 3,250 for
-    $9.99, 7,000 for $19.99.
-  - Division II (division2_pack) and Division III (division3_pack): one-time products, planned
-    $2.99 and $3.99. For sale only once the store confirms the product and its price (below).
+  - PIXEL POLO + (product id pro_unlock), $7.99 one-time: 200 Polo Points once (500 before the
+    Polo Points Economy update; owners who already got theirs get nothing more), player name and
+    cap number customization.
+  - Polo Points packs (ids blue_100/350/650/1400, unchanged): Starter 60 PP for $1.99, Gameday
+    180 PP for $5.99, All-Star 350 PP for $9.99, Legendary 800 PP for $19.99. The game decides what
+    a consumable pays, so the products stay as they are. **Their store listings must be edited by
+    hand** (App Store Connect > In-App Purchases and Play Console > In-app products): display
+    names and descriptions still describing 500 / 1,750 / 3,250 / 7,000 must say 60 / 180 / 350 /
+    800, and Pixel Polo +'s description must say 200 Polo Points. Prices stay the same.
   - Starter pack.
   - A playoff bundle that replaces the taper bundle: the whole team healthy and fired up before the conference tournament.
 - **PRO perks:**
@@ -101,10 +104,55 @@ This is a straight port of Retro Swim's store, with water polo names.
   - +2 recruiting visits.
 - **Credit vault:** bought credits survive a new career.
 - **"N CR SHORT" prompt:** offers the smallest pack that covers the gap, then finishes the upgrade.
+- **LUCKY SPIN** (section 4b).
 - **Real money needs:**
-  - The products created in App Store Connect under the bundle `com.akikawasaki.retropolo`.
+  - The products created in App Store Connect under your own bundle id (the export preset holds a placeholder).
   - The Paid Apps agreement.
   - The StoreKit 2 plugin Retro Swim already built for Godot 4.7.2.
+
+## 4b. Lucky Spin (rewarded ads)
+
+- **What it is:** an optional wheel in the Polo Points Shop. You watch one rewarded ad to get one spin,
+  and every spin wins Polo Points into the shared wallet. Ads never interrupt play.
+- **The wheel:** 11 equal slices: eight 5 PP (72.73%), two 10 PP (18.18%), one 15 PP (9.09%).
+  Expected value 6.82 PP a spin. The slice is drawn uniformly, 1 in 11 (`LuckySpin.pick`), and decided
+  and credited before the wheel moves. The wheel only shows the result.
+- **The allowance:** 2 spins, one per account (in `user://store.cfg`, never in a dynasty save). The
+  first spin taken from a full allowance starts a 6-hour clock, and when it runs out both spins come
+  back together. Spins never stack above 2. Opening the shop, dynasty weeks or seasons, saves,
+  reloads, restarts and RESET GAME don't change it.
+- **Code:** `LuckySpin` (rules and state), `Store.claim_spin` (pays once per ad session, saved in
+  the same write), `Ads` (autoload: one session at a time, reward only on the network's EARNED
+  callback, repeats ignored), `src/ads/backend_admob.gd`, `LuckyWheel`, `LuckySpinPanel`.
+  Tests: `--test lucky_spin`, screenshots `--test lucky_spin_png <dir>`.
+- **Desktop testing:** in the editor the button is TEST AD & SPIN. The Developer row picks the test
+  ad's outcome (reward, closed early, fails, no ad), the slice, and +1 HOUR on a test clock. Test
+  spins have their own allowance and their own wallet. They never touch real Polo Points and never
+  call AdMob. They're never in an exported game.
+- **To turn real ads on (only you can):**
+  1. Install the Poing Studios **godot-admob-plugin** (Godot 4.5+), Android and iOS, from its
+     releases page, and enable it. Ads finds it by its classes.
+  2. Create an AdMob app per platform and a **Rewarded** ad unit for each. Put the unit ids in
+     `Ads.PROD_UNITS`. Debug builds always use Google's test units. Set the AdMob app id in the
+     plugin's export settings (Android manifest / iOS Info.plist `GADApplicationIdentifier`).
+  3. **Privacy:** set up the GDPR and US-state consent messages in AdMob > Privacy & messaging. The
+     backend asks the User Messaging Platform first and requests no ads without consent. On iOS,
+     add the App Tracking Transparency message if you want personalized ads. Update the App Store
+     privacy label and the Play Data safety form ("Advertising ID", ads SDK).
+  4. Add an `app-ads.txt` to the developer website listed on the stores.
+  5. Test on real phones with test units first. `backend_admob.gd` has not been run on a device yet.
+- **Production security (not built yet: there is no game server):** today the device decides: the
+  session id, the clock, the allowance and the credit. That stops repeated callbacks, double
+  claims, two ads at once, save loading and a clock set back. It **can't** stop a clock set
+  forward or an edited `store.cfg`. To make it authoritative:
+  - Turn on AdMob **server-side verification**. The backend already sends the session id as SSV
+    `custom_data`.
+  - Add a small endpoint (a Cloudflare Worker like the relay works) that verifies Google's SSV
+    signature, keeps `transaction_id`s (idempotent), keeps each account's allowance on the server's
+    clock, and returns the slice it drew.
+  - Then make `Store.claim_spin` ask that endpoint instead of `LuckySpin.claim` and credit what it
+    returns, and set `Ads.server_verified`. Until then, treat spin coins as client-trusted, like the
+    rest of the local wallet.
 
 ## 5. Multiplayer
 
@@ -142,21 +190,3 @@ Your phone is an iPhone, so **Online is the one you'll be able to play first.**
 - **Store:** create the products in App Store Connect.
 - **Name:** "Retro ___" is New Star Games' naming family, so pick a final name before release.
 
-## Division packs
-
-Built. 24 schools join the 30 (Colleges.EXPANSION_SCHOOLS): 7 Division II (WWPA), 17 Division III (SCIAC 9,
-MPSF East 7, NWPC 1). Ids D2_01..D2_07 and D3_01..D3_17; conference ids WWPA, SCIAC, MPSFE, NEWPC (never
-Division I's old MPSF / NWPC ids).
-
-- **Buying.** division2_pack and division3_pack must be created as non-consumables in App Store Connect and
-  Play Console. Until the store answers with a price the shop shows COMING SOON with nothing to press
-  (Store.division_for_sale). Pixel Polo + owners have both (Store.division_access).
-- **New dynasty.** YOUR COACH has ACTIVE DIVISIONS. Only active divisions have teams in that save
-  (Career.divisions). The picker filters ALL / I / II / III; unowned packs show locked.
-- **Existing dynasties.** NEW DIVISION AVAILABLE! is asked once per pack (Career.div_answers). ADD NEXT SEASON
-  waits for Offseason.finish; NOT NOW can be changed in Settings > Game Options.
-- **Postseason.** Conference tournaments as before. The WWPA champion is Division II champion and takes one
-  of the NCSA's 12 places, seeded by the poll. The NCSA Division III Championship is four teams (SCIAC and MPSF
-  East champions, two at-large), played in the NCSA's first two weeks: its games carry `k` (Schedule.game_kind).
-  The NWPC has no tournament.
-- **Developer Mode.** DIVISION EXPANSION TESTING (division_lab, DivisionChecks); `--test divisions`.

@@ -33,9 +33,9 @@ func _timeline() -> void:
 	var b: PoloTeam = tt[1]
 	var it := PregameIntro.new(a, b, true, "REGULAR SEASON")
 	it.calm = false
-	r.check(it.home == a and it.away == b, "14: home (the match's us) on the left door")
+	r.check(it.home == a and it.away == b and it.left == a and it.right == b, "14: home game: ours (home) on the left door")
 	var it2 := PregameIntro.new(a, b, false, "")
-	r.check(it2.home == b and it2.away == a, "13/16: away game: their logo on the left, ours on the right (the schedule's home, never a guess)")
+	r.check(it2.home == b and it2.away == a and it2.left == a and it2.right == b, "13/16: away game: still ours on the left door, theirs (home) on the right")
 	var seen := []
 	var last_z := 0.0
 	var mono := true
@@ -138,7 +138,8 @@ func _lab() -> void:
 	Game.career = c
 	var before := JSON.stringify(c.to_dict())
 	Game.settings.dev_mode = true
-	Game.goto("settings")
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings")
 	await _frames(3)
 	r.check(Game.current_screen.find_child("CinemaLab", true, false) != null and Game.current_screen.find_child("HotStarLab", true, false) != null
 		and Game.current_screen.find_child("CoinLab", true, false) != null, "36: PREGAME CINEMATIC TESTING with every other tool")
@@ -165,7 +166,7 @@ func _lab() -> void:
 	lab._do_skip()
 	r.check(lab.handovers == 1 and lab.intro.skipped, "43: TEST SKIP: one hand-over")
 	for st in lab.STILLS:
-		lab.still(float(st[1]), String(st[0]))
+		lab.still(lab.at(float(st[1])), String(st[0]))
 	r.check(lab.intro.stage() == "MATCHUP", "20: the stage stills")
 	Game.settings.dev_mode = false
 	Game.goto("title")

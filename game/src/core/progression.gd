@@ -91,9 +91,6 @@ func tier_of(id: String) -> int:
 ## with ALL 30 TEAMS bought (Store.all_teams: the store's entitlement, kept apart from this
 ## profile, so it never counts as an achievement and buying it earns none).
 func is_unlocked(id: String) -> bool:
-	var d := Colleges.division_of(id)
-	if d != Colleges.D1:
-		return Store.division_owned(d)   # (an expansion school: its pack opens it, not the Road)
 	return id in unlocked or Store.all_teams
 
 func schools_in_tier(t: int) -> Array:
@@ -129,10 +126,6 @@ func picker_groups(teams: Dictionary = {}) -> Array:
 func requirement(id: String) -> Dictionary:
 	if is_unlocked(id):
 		return {}
-	var d := Colleges.division_of(id)
-	if d != Colleges.D1:
-		var pack := "%s EXPANSION PACK" % Colleges.division_name(d)
-		return {"id": "pack", "req": pack, "card": pack, "head": pack, "title": pack, "tier": 0}
 	return achievement_for_tier(tier_of(id))
 
 ## Adds every school of tier 1 and of each earned achievement's tier. Never takes one away.

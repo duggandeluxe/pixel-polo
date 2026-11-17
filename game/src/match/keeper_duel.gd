@@ -82,8 +82,8 @@ func setup(shooter: PoloPlayer, keeper: PoloPlayer, p_from: Vector2, p_goal_x: f
 	from = p_from
 	penalty = p_penalty
 	by = shooter
-	shooter_skill = clampf(shooter.live("shoot") / 100.0, 0.0, 1.0)
-	shooter_pace = clampf(Attributes.shot_pace(shooter) / 100.0, 0.0, 1.0)   # (Hot Stars in it: play_value)
+	shooter_skill = clampf(shooter.live("shoot") / 100.0, 0.0, Attributes.rating_top(shooter) / 100.0)
+	shooter_pace = clampf(Attributes.shot_pace(shooter) / 100.0, 0.0, Attributes.rating_top(shooter) / 100.0)   # (Hot Stars in it: play_value; a DEV Recruit's past 100)
 	_keeper(keeper, level)
 	windup = WINDUP * (1.15 if penalty else 1.0) * Attributes.release_mult(shooter)
 	_aim()

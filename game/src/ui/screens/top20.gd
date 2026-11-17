@@ -45,12 +45,6 @@ func _render() -> void:
 	var mine := Poll.rank_in(poll, c.school)
 	if mine > Poll.TOP + Poll.RV:
 		v.add_child(UI.label("%s: #%d IN THE POLL (UNRANKED)" % [Colleges.display_name(c.team().name).to_upper(), mine], 8, UI.GOLD, "caps"))
-	var note := "Ranked by results: win % (45), strength of schedule (25), quality wins (20) and recent form (10), never by team ratings. " + \
-		("The SELECTION poll picks the NCSA Championship's 7 at-large teams, straight down from #1." if String(poll.get("kind", "")) != "select" else "The 7 highest-ranked teams that aren't conference champions got the NCSA at-large bids.")
-	var np := PanelContainer.new()
-	np.add_theme_stylebox_override("panel", UI.sb(Deck.NAVY, UI.ACCENT, 1, 6, 4))
-	np.add_child(para(note, UI.TEXT, 400))
-	v.add_child(np)
 	body.add_child(UI.scroll(v))
 
 ## < POLL NAME >: the polls before and after this one.
@@ -79,7 +73,7 @@ func _draw_table(ci: Control, rows: Array) -> void:
 	var rk_w := Deck.text_w("#22") + 4.0
 	var x_rk := float(PAD)
 	rk_w = Deck.text_w("#20", 16, "big") + 4.0
-	var x_team := x_rk + rk_w + 14.0
+	var x_team := x_rk + rk_w + 8.0
 	var col_w := maxf(Deck.text_w("PREV", 16, "big"), Deck.text_w("16-16")) + 10.0
 	var x_pts := w - PAD - Deck.text_w("PTS", 16, "big")
 	var x_move := x_pts - col_w
@@ -107,9 +101,6 @@ func _draw_table(ci: Control, rows: Array) -> void:
 		var t: PoloTeam = c.teams[d.id]
 		var rk_col: Color = MEDALS[int(d.rank) - 1] if not d.rv and int(d.rank) <= 3 else (UI.DIM if d.rv else col)
 		Deck.rtext(ci, x_rk + rk_w, mid, ("RV" if d.rv else str(d.rank)), 16, rk_col, "big")
-		# the school's colours as a little cap swatch
-		ci.draw_rect(Rect2(x_team - 10, mid - 3, 6, 6), t.c2)
-		ci.draw_rect(Rect2(x_team - 9, mid - 2, 4, 4), t.c1)
 		Deck.text(ci, x_team, mid, Deck.fit(Colleges.display_name(t.name).to_upper(), team_w, 16, "big"), 16, col, "big")
 		Deck.text(ci, x_rec, mid, "%d-%d" % [d.rec[0], d.rec[1]], 8, col)
 		Deck.text(ci, x_conf, mid, "%d-%d" % [d.rec[2], d.rec[3]], 8, UI.DIM if not me else col)

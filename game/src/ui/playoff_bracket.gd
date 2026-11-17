@@ -46,9 +46,8 @@ const WIN_TINT := Color(1.0, 0.82, 0.25, 0.14)  # the winner's row, a touch of g
 const CARD_TOP := Color("12286e")             # a card's top edge, a shade lighter than its navy
 const GOLD_DARK := Color("b8860b")
 const ROUND_HEADS := {"conf_qf": "QUARTERFINALS", "conf_semi": "SEMIFINALS", "conf_final": "CONFERENCE FINAL",
-	"nat_r1": "FIRST ROUND", "nat_qf": "QUARTERFINALS", "nat_sf": "SEMIFINALS", "nat_final": "NCSA FINAL",
-	"d3_sf": "SEMIFINALS", "d3_final": "DIVISION III FINAL"}
-const SHORT := {"conf_qf": "QF", "conf_semi": "SF", "conf_final": "FINAL", "nat_r1": "R1", "nat_qf": "QF", "nat_sf": "SF", "nat_final": "FINAL", "d3_sf": "SF", "d3_final": "FINAL"}
+	"nat_r1": "FIRST ROUND", "nat_qf": "QUARTERFINALS", "nat_sf": "SEMIFINALS", "nat_final": "NCSA FINAL"}
+const SHORT := {"conf_qf": "QF", "conf_semi": "SF", "conf_final": "FINAL", "nat_r1": "R1", "nat_qf": "QF", "nat_sf": "SF", "nat_final": "FINAL"}
 
 ## Game pixels a unit: FINE in detail mode (the PLAYOFFS tab), else 1.
 static func scale() -> float:
@@ -62,8 +61,6 @@ static func scale() -> float:
 ## once there is one ("" not yet); `game` the scheduled game ({} for a bye or one not drawn yet);
 ## `label` its name in the round ("QF2"), "" for a bye.
 static func model(c: Career, fam: String, conf: String) -> Dictionary:
-	if fam == "d3":
-		return _d3_model(c)
 	var idx: Array = Schedule._family(c.schedule, fam)
 	if idx.is_empty():
 		return {"empty": true, "rounds": []}
@@ -124,39 +121,6 @@ static func model(c: Career, fam: String, conf: String) -> Dictionary:
 		champion = ""
 	return {"rounds": rounds, "champion": champion, "projected": projected, "empty": false, "size": size,
 		"seeds": seeds, "fam": fam, "conf": conf, "preview": preview}
-
-## The NCSA Division III Championship's bracket: its four seeds as Schedule drew them, its two
-## rounds read from the games marked in the NCSA's first two weeks. {empty} until the field is named.
-static func _d3_model(c: Career) -> Dictionary:
-	var seeds: Array = (c.season.get("d3_seeds", []) as Array).duplicate()
-	if seeds.is_empty():
-		return {"empty": true, "rounds": [], "size": Schedule.D3_FIELD, "fam": "d3", "conf": ""}
-	var slots: Array = Schedule._slots(seeds, Schedule.D3_FIELD)
-	var rounds: Array = []
-	var champion := ""
-	for kind in ["d3_sf", "d3_final"]:
-		var games: Array = []
-		for r in c.schedule:
-			games.append_array((r.games as Array).filter(func(g): return String(g.get("k", "")) == kind))
-		var matches: Array = []
-		var next: Array = []
-		var n := 0
-		for i in range(0, slots.size(), 2):
-			n += 1
-			var m := {"a": slots[i], "b": slots[i + 1], "game": {}, "bye": false, "win": "", "label": "FINAL" if kind == "d3_final" else "SF%d" % n}
-			for g in games:
-				if (g.h == m.a and g.a == m.b) or (g.h == m.b and g.a == m.a):
-					m.game = g
-			if not m.game.is_empty() and m.game.r != null:
-				m.win = Schedule.winner(m.game)
-			next.append(m.win if m.win != "" else "?")
-			matches.append(m)
-		rounds.append({"kind": kind, "matches": matches})
-		slots = next
-	if slots.size() == 1 and slots[0] != "?":
-		champion = slots[0]
-	return {"rounds": rounds, "champion": champion, "projected": false, "empty": false, "size": Schedule.D3_FIELD,
-		"seeds": seeds, "fam": "d3", "conf": "", "preview": false}
 
 ## Who's in place `side` ("a" / "b") of match `j` of round `k`, as a card shows it: the team, or
 ## where he'll come from ("WINNER OF QF1"), or "TBD".
@@ -394,11 +358,7 @@ static func _team_row(ci: CanvasItem, c: Career, m: Dictionary, r: Rect2, id: St
 		x += lb.x + 5
 	var score := ""
 	if not g.is_empty() and g.r != null:
-		var sc_arr: Array = g.r.s
-		score = str(int(sc_arr[0]) if g.h == id else int(sc_arr[1]))
-		if not (g.r.so as Array).is_empty():
-			var so: Array = g.r.so
-			score += "(%d)" % (int(so[0]) if g.h == id else int(so[1]))
+		score = Schedule.side_text(g.r.s, g.r.so, 0 if g.h == id else 1)
 	elif not g.is_empty() or not m.projected:
 		score = "-"
 	var big_score := final and score != "-" and score != ""

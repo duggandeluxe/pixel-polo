@@ -33,27 +33,34 @@ static func shot_ctx(shooter: PoloPlayer, passer: PoloPlayer, keeper: PoloPlayer
 		"release": Attributes.release_read(shooter),
 		"lunge": Attributes.lunge_mult(keeper), "leg": Attributes.leg_reach(keeper), "block": Attributes.block_mod(keeper),
 		"lunge_k": Attributes.keeper_skill(keeper, "lun"), "leg_k": Attributes.keeper_skill(keeper, "leg"),
-		"window": Attributes.dive_window(keeper), "wall": Traits.has(keeper, "wall")}
+		"window": Attributes.dive_window(keeper), "wall": Traits.has(keeper, "wall"), "skill_top": Attributes.rating_top(shooter)}
 
 ## `n` shots by `shooter` at their AI keeper `keeper` (ShotModel.resolve, nobody in the way),
 ## from SHOT_FROM aimed SHOT_AIM off the middle (alternating corners), `catch_t` after a catch from
 ## `passer`. {goal (share), save, reaction (s, his average), reach (m, his average when it was
 ## a save or a touch)}.
 ## `right_way`: their keeper dives the way each shot goes (his anticipation out of it: only his body
-## and hands are measured).
+## and hands are measured). `live_pace`: the shot's pace from his SHOOTING as Play reads it
+## (Attributes.shot_pace) rather than his 0-100 rating (the DEV Recruits' OP ATTRIBUTE IMPACT).
+## `blockers` (ShotModel.blocker records) stand in the way, the nearest defender `pressure_d` m off
+## him (the DEV Recruits' contested shot; nobody, 9 m, otherwise).
 static func shots(shooter: PoloPlayer, passer: PoloPlayer, keeper: PoloPlayer, catch_t: float = INF, n: int = N, seed_value: int = 7,
-		from: Vector2 = SHOT_FROM, right_way := false, aim_off: float = SHOT_AIM) -> Dictionary:
+		from: Vector2 = SHOT_FROM, right_way := false, aim_off: float = SHOT_AIM, live_pace := false,
+		blockers: Array = [], pressure_d: float = 9.0) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var ctx := shot_ctx(shooter, passer, keeper, catch_t)
+	if live_pace:
+		ctx["pace"] = Attributes.shot_pace(shooter)
 	var goals := 0
 	var saves := 0
+	var blocked := 0
 	var react := 0.0
 	for i in n:
 		var aim := Geo.GOAL_Y + (aim_off if i % 2 == 0 else -aim_off)
 		if right_way:
 			ctx["dive_side"] = KeeperDive.RIGHT if i % 2 == 0 else KeeperDive.LEFT
-		var res := ShotModel.resolve(from, aim, 0.8, float(shooter.shoot), 9.0, [],
+		var res := ShotModel.resolve(from, aim, 0.8, float(shooter.shoot), pressure_d, blockers,
 			Geo.GOAL_Y, float(keeper.keeping), rng, false, {}, ctx)
 		react += float(res.reaction)
 		match String(res.outcome):
@@ -61,7 +68,9 @@ static func shots(shooter: PoloPlayer, passer: PoloPlayer, keeper: PoloPlayer, c
 				goals += 1
 			"save", "parry":
 				saves += 1
-	return {"goal": float(goals) / n, "save": float(saves) / n, "reaction": react / n}
+			"block":
+				blocked += 1
+	return {"goal": float(goals) / n, "save": float(saves) / n, "block": float(blocked) / n, "reaction": react / n}
 
 ## The keeper's reaction (s) to a plain shot by an average shooter, without the dice.
 static func reaction(keeper: PoloPlayer, shooter: PoloPlayer = null) -> float:

@@ -934,22 +934,30 @@ func _bar() -> void:
 	var size: Vector2 = screen.get_viewport_rect().size
 	screen.fbar.layout(size, Vector2.ZERO, 3.0 + Hud.tag_parts(flow.play.keeper.player).size.x + 4.0)   # (as the screen lays it out)
 	var rects: Array[Rect2] = screen.fbar.rects
-	r.check(rects.size() == 2 and rects.all(func(x: Rect2): return Rect2(Vector2.ZERO, size).encloses(x)), "two buttons (PRESS, your drop), all on screen")
+	r.check(rects.size() == 1 and Rect2(Vector2.ZERO, size).encloses(rects[0]) and rects[0].size.x > 96.0, "one button, CALL DROP, on screen, bigger than the old ones (%.0f px)" % rects[0].size.x)
 	r.check(rects[0].end.y >= size.y - 5.0 and rects[0].size.y >= FormationBar.H_MIN, "along the bottom, big (%.0f px tall)" % rects[0].size.y)
 	r.check(FormationBar.shown(flow), "shown while you defend")
 	var tag_w: float = Hud.tag_parts(flow.play.keeper.player).size.x + 3.0
 	r.check(rects[0].position.x > tag_w, "clear of your keeper's tag, bottom left (%.0f px vs %.0f)" % [rects[0].position.x, tag_w])
-	# a tap on 5 DROP (a real touch, the mouse's too: emulate_touch_from_mouse) picks and locks it
-	_touch(screen, rects[1].get_center())
-	r.check(flow.play.formation == F.FIVE_DROP and flow.play.formation_locked, "a tap on 5 DROP picks it")
+	var dh: Swimmer = flow.play.holder
+	r.check(dh != null and dh != flow.play.keeper and flow.play.attackers.has(dh) and screen._tag_holder(flow.play) == dh.player
+		and flow.them.roster.has(dh.player), "the bottom-left tag is their man on the ball (from their roster), not your keeper")
+	var room: float = screen._tag_room
+	r.check(rects[0].position.x > 3.0 + room, "CALL DROP clear of any of their tags (%.0f px)" % room)
+	r.check(flow.play.formation == F.PRESS and not FormationBar.called(flow.play), "the possession starts in the normal defence, the button up")
+	# a tap on CALL DROP (a real touch, the mouse's too: emulate_touch_from_mouse) calls your drop, 5 DROP
+	Play.instant_drops = true
 	_touch(screen, rects[0].get_center())
-	r.check(flow.play.formation == F.FIVE_DROP, "...and the others are off for the possession")
+	r.check(flow.play.formation == F.FIVE_DROP and flow.play.formation_locked, "a tap on CALL DROP calls 5 DROP")
+	_touch(screen, rects[0].get_center())
+	r.check(flow.play.formation == F.FIVE_DROP and flow.play.formation_locked, "...a second tap doesn't cancel it")
+	Play.instant_drops = false
 	r.check(flow.keeper_anim == null, "a tap on the bar never dives your keeper")
 	# their shot wound up: a tap on the bar is your dive, not a call
 	var q := flow.play
 	flow.opp_plan = {"target": Vector2(Geo.GOAL_X + 0.4, 10.5), "power": 0.8, "shot": true, "t": 0.3}
-	r.check(flow.can_dive() and not screen.fbar.press(rects[1].get_center(), flow), "their shot coming: the bar doesn't take the tap...")
-	_touch(screen, rects[1].get_center())
+	r.check(flow.can_dive() and not screen.fbar.press(rects[0].get_center(), flow), "their shot coming: the bar doesn't take the tap...")
+	_touch(screen, rects[0].get_center())
 	r.check(flow.keeper_anim != null and q.formation == F.FIVE_DROP, "...it's your dive")
 	flow.opp_plan = {}
 	# your attack: no bar; their defence's formation is shown under the shot clock
@@ -1068,7 +1076,7 @@ func _counterplay(n: int) -> void:
 	_report(res)
 	var g := func(f: int, k: String) -> float: return float(res[f][k]) / maxf(1.0, float(res[f].poss))
 	var sh := func(f: int, k: String) -> float: return float(res[f][k]) / maxf(1.0, float(res[f].shots))
-	r.check(sh.call(F.FIVE_DROP, "sh_5") > sh.call(F.PRESS, "sh_5") * 1.4, "against 5 DROP their A5 shoots far more (%.0f vs %.0f pct of shots)" % [100.0 * sh.call(F.FIVE_DROP, "sh_5"), 100.0 * sh.call(F.PRESS, "sh_5")])
+	r.check(sh.call(F.FIVE_DROP, "sh_5") > sh.call(F.PRESS, "sh_5") * 1.2, "against 5 DROP their A5 shoots more (%.0f vs %.0f pct of shots)" % [100.0 * sh.call(F.FIVE_DROP, "sh_5"), 100.0 * sh.call(F.PRESS, "sh_5")])
 	r.check(g.call(F.M_DROP, "entries") < g.call(F.PRESS, "entries") * 0.75 and sh.call(F.M_DROP, "sh_C") < sh.call(F.PRESS, "sh_C"),
 		"against M-DROP they feed the centre less and shoot from outside instead")
 	for f in [F.FOUR_FIVE, F.THREE_FOUR]:

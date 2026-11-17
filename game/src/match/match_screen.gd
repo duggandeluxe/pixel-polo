@@ -12,7 +12,7 @@ var mcam := ManUpCam.new()   # the 6 on 5 push in and its impact shake (the worl
 var aim := AimGuide.new()
 var stick := ShotStick.new()   # the shooting stick on the left: the only way you shoot (AimGuide.stick_at)
 var calls := CallStrip.new()   # DRIVE▾, your play call
-var fbar := FormationBar.new() # your defence's formation, along the bottom while they attack
+var fbar := FormationBar.new() # your defence's CALL DROP button, bottom right while they attack
 var halftime := HalftimePanel.new()   # the halftime break's MID-GAME ADJUSTMENT
 var sprint: Sprint = null
 var canvas: Control
@@ -29,6 +29,7 @@ var end_timer := -1.0          # counting down after a possession ends
 var sprint_end := -1.0
 var card_t := 0.0
 var card_shown := 0
+var break_t0 := 0.0                   # t when the quarter break came up (its scoreboard's drop-in)
 var banner := EventBanner.new()   # every gameplay callout (FOUL!, WIDE!...), one at a time
 var goal_show := GoalShow.new()   # a goal's moment: GOAL!, the scorer, the board going up (GoalShow)
 var bar_show := BarHit.new()      # ...in off the frame first: BAR-IN! / BAR-DOWN! (BarHit)
@@ -39,7 +40,7 @@ var pool: PoolDef              # the venue: the home team's pool
 var crowd := 0.8               # how full the stands are
 var career := false            # a career game: the result goes back to Game.career
 var handed_over := false       # the result has gone to the career
-var level := Difficulty.MEDIUM   # difficulty this match is played at (Difficulty): fixed at the start, never moved during it
+var level := Difficulty.BASELINE   # difficulty this match is played at (Difficulty): fixed at the start, never moved during it
 var duel_bodies: Array[Swimmer] = []   # their shot: your keeper, the shooter, a couple more
 var duel_end := -1.0           # counting down after the duel's result
 var duel_start := 0.0          # when the duel scene came up
@@ -52,32 +53,70 @@ var roll_note := {}            # the last roll-out's notice (Hud.roll_note), fro
 var roll_note_t := -100.0
 var intro: PregameIntro = null # the pregame entrance (PregameIntro): the match waits, untouched, until it's done
 var intros_done := 0           # (tests: the hand-over happens once)
-var rec: ReplayBuffer = null   # the last few seconds on the water (null: replays off for this match)
-var replay: ReplayShow = null  # a goal's replay: the match waits at the stoppage until it's over
-var replay_then := Callable()  # ...and this carries on, once
-var replay_goal := false       # a goal's been scored this possession: one replay when its show ends
-var replay_who: PoloPlayer = null   # ...by him
-var replay_side := 0                # ...for this side
-var replays_done := 0          # (tests)
-var replay_who_seen: PoloPlayer = null   # the scorer of the replay on now (tests)
-var replay_level := 1          # what a goal's replay is (ReplayShow.level_for)
 var bot_sprint_t := 0.0        # autoplay: seconds since the sprint's whistle
-var goal_fx := GoalFx.new()    # the Goal Celebrations level over the goal show
+var goal_fx := GoalFx.new()    # the equipped Goal Celebration, at the goal (GoalFx)
 var broadcast := BroadcastFx.new()   # the Broadcast Presentation level's graphics
-var victory: VictoryShow = null      # your win, before the full-time panel
-var victories_done := 0        # (tests)
-var victory_on := false        # this match shows it
-var victory_title := ""        # "conf" / "nat": this game is that final
-var victory_big := false
 var stand_style := {}          # the Crowd Atmosphere level (CrowdArt.style; {}: the plain crowd)
+var crowd_seed := 0            # the stands' seating for this match (CrowdArt.style's seed)
+
+## LIVE SIM (the pause menu's SIM): the rest of the match plays itself, both teams on the computer's
+## brain (MatchFlow.sim_us, OffenseAI; your keeper on KeeperDuel.bot at your keeper's own read),
+## watched fast-forwarded like a TV broadcast. Nothing about the match changes but who decides for
+## you and how fast it's shown: every frame is cut into fixed SIM_STEP steps of the ordinary match
+## (_frame), so the players, the ball, the clocks and every rule run exactly as in play, just more
+## of them a second. A shot (its wind-up and flight), the whistle after a possession and above all
+## a goal's show ease the speed down so you can see them; then it spins back up.
+## SIM_PACE scales every SIM playback speed below (and shortens the break card to match): how
+## fast the broadcast is shown, never what happens in it.
+const SIM_PACE := 1.2
+const SIM_SPEED := 16.0 * SIM_PACE     # x normal: ordinary play...
+const SIM_SPEED_MIN := 4.0 * SIM_PACE  # ...never backed off below this on a device that can't keep up
+const SIM_SHOT := 5.0 * SIM_PACE       # ...a shot winding up or in the air
+const SIM_HOLD := 5.0 * SIM_PACE       # ...the whistle's moment after a possession (SAVE!, STEAL!, the sprint's result)
+const SIM_GOAL := 1.8 * SIM_PACE       # ...a goal's show (GoalShow.total, ~2.6 s): about 1.2 s on the screen
+const SIM_BREAK := 1.2 / SIM_PACE      # real seconds a quarter break's card stays up before play carries on
+const SIM_STEP := 1.0 / 60.0   # the fixed step SIM frames are cut into (a normal 60 Hz frame)
+const SIM_MAX_STEPS := 20      # steps one frame may run at most (>= SIM_SPEED at 60 fps): the rest is dropped, never owed
+const SIM_BUDGET_MS := 9.0     # ...and the time it may spend on them before the speed backs off
+const SIM_EASE_DOWN := 60.0    # 1/s: into a slowdown (near at once: the shot mustn't race past)
+const SIM_EASE_UP := 12.0      # 1/s: back up to speed (a tape spinning up, ~0.3 s)
+const SIM_CAM := 3.0 * SIM_PACE  # the camera follows at most this much faster than in play: steady
+const SIM_IN := 0.35           # s: the switch-on, a TV coming on
+var sim := false
+var sim_rate := 1.0            # x normal right now (eased towards _sim_target)
+var sim_cap := SIM_SPEED       # the most this device manages (backs off, recovers)
+var sim_acc := 0.0             # match seconds owed to the fixed steps
+var sim_t := 0.0               # real seconds in SIM (the indicator's blink)
+var sim_in := 0.0              # the switch-on, 1 -> 0
+var sim_break_t := 0.0         # real seconds the break card's been up
+var sim_return := false        # RETURN TO GAME: control comes back at the next safe moment (_sim_safe)
+var sim_keeper := 0.5          # your keeper's dive timing on the bot (KeeperDuel.bot), from his own Lunge Speed
+var sim_sprint := 0.0          # your sprinter as the computer swims theirs (MatchFlow.sprint_speed_of)
+var sim_rect := Rect2()        # the PAUSE control
+var jump_rect := Rect2()       # JUMP IN, bottom right: RETURN TO GAME in one tap
+var jump_down := 0.0           # real s JUMP IN shows pressed before it hands over (a click you can see)
+var jump_hand := false         # the pointing-hand cursor is up (over JUMP IN)
+const JUMP_PRESS := 0.09
+var sim_steps := 0             # (tests and the speed report) fixed steps run...
+var sim_real := 0.0            # ...over this many real seconds
+var sim_runs := 0              # (tests) times SIM has been switched on
+var sim_at_start := false      # START IN SIM (the game preview): SIM switches on at kickoff, once the intro is over
+# SIM TO END (the career pause menu): the rest of the match worked out at once from the teams'
+# ratings (SimFinish: no frames played, no loading screen), from exactly where it was, then full
+# time as ever
+var sim_ends := 0              # times SIM TO END has run (once a match)
+var sim_end_ms := -1.0         # (tests, the speed report) real ms it took, confirm to full time
+var neutral_site := false      # a neutral pool: no home edge in SIM TO END's numbers
 
 func setup(params: Dictionary) -> void:
 	var cfg: Dictionary = params if not params.is_empty() else Game.match_cfg
 	autoplay = cfg.get("autoplay", false)
-	career = cfg.get("career", false) and Game.career != null
+	sim_at_start = bool(cfg.get("start_sim", false))
+	career =cfg.get("career", false) and Game.career != null
 	level = float(cfg.get("level", Difficulty.level_for(career)))
 	flow = MatchFlow.new(cfg.us, cfg.them, int(cfg.get("seed", randi())), float(cfg.get("minutes", MatchState.QUARTER_MIN)), level)
 	flow.home = cfg.get("home", true)
+	neutral_site = bool(cfg.get("neutral", false))
 	bot_rng.seed = 99
 	pool = Pools.get_def(String(cfg.get("pool", Pools.DEFAULT_ID)))
 	if career:
@@ -92,18 +131,10 @@ func setup(params: Dictionary) -> void:
 	# the pregame entrance: a match you play (never a bot's, a test's unless asked, or the tutorial,
 	# which has its own setup); the game's designation from the schedule
 	var home_side: PoloTeam = flow.us if bool(cfg.get("home", true)) else flow.them
-	stand_style = CrowdArt.style(Store.looks.worn("crowd"), home_side, flow.them if home_side == flow.us else flow.us, bool(cfg.get("neutral", false)), crowd, HotFire.calm(),
-		int(cfg.get("importance", 0)))
+	crowd_seed = randi()   # (who sits where: fixed for the whole match)
+	stand_style = CrowdArt.style(CrowdArt.level_for(Store.looks.worn("crowd")), home_side, flow.them if home_side == flow.us else flow.us, bool(cfg.get("neutral", false)), crowd, HotFire.calm(),
+		int(cfg.get("importance", 0)), crowd_seed)
 	broadcast = BroadcastFx.new(Store.looks.worn("broadcast"), HotFire.calm())
-	victory_on = bool(cfg.get("victory", not autoplay and not Game.test_mode))
-	victory_title = String(cfg.get("title", ""))
-	victory_big = int(cfg.get("importance", 0)) >= 1
-	# instant replay: recorded for a match you play once it's unlocked and switched on. Locked,
-	# nothing is recorded and a goal goes straight on. ReplayShow's levels: 2 the plain replay, 3
-	# the cinematic one; which is the owner's presentation setting (Settings "replay_style")
-	replay_level = int(cfg.get("replay_level", ReplayShow.level_for(Store.looks.worn("replay"), String(Game.settings.get("replay_style", "cinematic")))))
-	if bool(cfg.get("replay", not autoplay and not Game.test_mode)) and bool(Game.settings.get("auto_replay", true)) and replay_level >= 2:
-		rec = ReplayBuffer.new()
 	if bool(cfg.get("intro", not autoplay and not Game.test_mode)):
 		intro = PregameIntro.new(flow.us, flow.them, bool(cfg.get("home", true)), String(cfg.get("stage", "")),
 			String(cfg.get("venue", "")), pool)
@@ -124,17 +155,18 @@ func _ready() -> void:
 func _process(dt: float) -> void:
 	if paused:
 		return
+	if sim_at_start and intro == null:
+		sim_at_start = false   # START IN SIM: the same match from 0:00, the broadcast from the first whistle
+		_start_sim()
+	if sim:
+		_sim_process(dt)
+		return
+	_frame(dt)
+
+## One frame of the match, `dt` seconds of its time: the real frame in play, one SIM_STEP in SIM.
+func _frame(dt: float) -> void:
 	if intro != null:
 		_tick_intro(dt)
-		return
-	if replay != null:
-		_tick_replay(dt)
-		return
-	if victory != null:
-		victory.step(dt)
-		if victory.done:
-			_end_victory()
-		canvas.queue_redraw()
 		return
 	t += dt
 	excite = maxf(0.0, excite - dt * 0.5)
@@ -164,9 +196,7 @@ func _process(dt: float) -> void:
 	bar_show.step(dt)
 	if results != null and flow.phase == MatchFlow.Phase.FINAL:
 		results.step(dt)
-	if rec != null and flow.phase in [MatchFlow.Phase.ATTACK, MatchFlow.Phase.DEFENSE, MatchFlow.Phase.THEIR_SHOT]:
-		_record(dt)
-	_tick_man_up_cam(dt)
+	_tick_man_up_cam(dt * _cam_rate())
 	canvas.queue_redraw()
 
 # ------------------------------------------------------------------ the 6 on 5 camera
@@ -197,75 +227,11 @@ func _man_up_pivot(p: Play) -> Vector2:
 	var s := view.to_screen((lo + hi) * 0.5)
 	return Vector2(clampf(s.x, 0.0, view.width), clampf(s.y, PoolView.HUD_H, view.height))
 
-# ------------------------------------------------------------------ instant replay
-## What's on the water now into the recorder (it only reads).
-func _record(dt: float) -> void:
-	var bodies: Array = duel_bodies if flow.phase == MatchFlow.Phase.THEIR_SHOT else (flow.play.bodies() if flow.play != null else [])
-	if bodies.is_empty():
-		return
-	rec.tick(dt * goal_show.time_scale() * bar_show.play_scale(), bodies, _record_ball(), view)
-
-func _record_ball() -> Dictionary:
-	if flow.phase == MatchFlow.Phase.THEIR_SHOT and flow.duel != null:
-		var d := flow.duel
-		var b: Ball = duel_ball
-		var at := Vector3(b.pos.x, b.pos.y, b.z) if b != null else Vector3(d.ball_pos().x, d.ball_pos().y, d.ball_z())
-		var flying := d.state == KeeperDuel.State.FLIGHT
-		return {"at": at, "shot": flying, "dir": Vector2(d.goal_x, d.cross_y) - d.from,
-			"power": PoolArt.shooter_power(d.shooter_pace * 100.0), "fire": Attributes.hot_stars(d.by), "flown": 1.0, "net": _net()}
-	return ReplayBuffer.ball_of(flow.play.ball, _net())
-
-## The goal's show is over: its replay if there's one to show, then `then` (the goal's counted
-## there, as it always was). No replay: straight on.
+# ------------------------------------------------------------------ after a goal's show
+## The goal's show is over: `then` (the goal's counted there, as it always was).
 func _after_show(then: Callable) -> void:
-	var scored := replay_goal
-	replay_goal = false
-	var who := replay_who
-	var side := replay_side
 	_end_goal_show()
-	if not scored or rec == null or flow.state.in_shootout:
-		then.call()
-		return
-	var cl := rec.clip()
-	rec.clear()
-	if cl.is_empty():
-		then.call()
-		return
-	replay = ReplayShow.new(cl, replay_level, HotFire.calm())
-	replay_who_seen = who
-	replay.pool = pool
-	replay.crowd = crowd
-	replay.style = stand_style
-	replay.who = who.short_name() if who != null else ""
-	replay.team = Colleges.short_name(flow.us if side == 0 else flow.them).to_upper()
-	replay.col = _us_cap() if side == 0 else flow.them.cap_against(_us_cap())
-	replay.paint_body = func(ci: CanvasItem, v: PoolView, sw: Swimmer): PoolArt.draw_body(ci, v, sw, _cap(sw), _trim(sw), _design(sw))
-	replay_then = then
-	Sfx.play("card", 1.0, -8.0)
-
-func _tick_replay(dt: float) -> void:
-	replay.step(dt)
-	if replay.done:
-		_end_replay()
-	canvas.queue_redraw()
-
-## The replay's over or skipped: the match carries on, once.
-func _end_replay() -> void:
-	if replay == null:
-		return
-	replay = null
-	replays_done += 1
-	var then := replay_then
-	replay_then = Callable()
-	if then.is_valid():
-		then.call()
-
-## The win's presentation is over (or skipped): the full-time panel, as ever. Once.
-func _end_victory() -> void:
-	if victory == null:
-		return
-	victory = null
-	victories_done += 1
+	then.call()
 
 ## The pregame entrance's frame: only it moves (no clock, no shot clock, no play); its end hands
 ## the match over, once.
@@ -313,6 +279,8 @@ func _enter_phase() -> void:
 		MatchFlow.Phase.SPRINT:
 			sprint = Sprint.new(flow.us, flow.them, flow.their_sprint_speed())
 			sprint_end = -1.0
+			if sim:
+				sim_sprint = MatchFlow.sprint_speed_of(flow.us, bot_rng)
 			view.snap_to(sprint.focus())
 		MatchFlow.Phase.ATTACK:
 			view.snap_to(view.attack_frame(flow.play))
@@ -339,8 +307,11 @@ func _enter_phase() -> void:
 			if flow.state.is_last_quarter():
 				flow.break_done()   # no card after the 4th: the results (or the shootout) come straight up
 			else:
+				break_t0 = t
 				Sfx.play("bell")
 		MatchFlow.Phase.FINAL:
+			if sim:
+				_end_sim()   # full time: the results and everything after at their own pace
 			Sfx.crowd(0.0)
 			results = ResultsPanel.new().setup(flow.state,
 				Game.career.records_after(flow.state.winner() == 0) if career and Game.career != null else {})
@@ -349,13 +320,6 @@ func _enter_phase() -> void:
 				Difficulty.after_game(career, flow.state.score[0], flow.state.score[1], flow.us, flow.them)
 			var won := flow.state.winner() == 0
 			Sfx.music("victory" if won else "")
-			if won and victory_on:
-				victory = VictoryShow.new(flow.us, Store.looks.worn("victory"), victory_title, victory_big, HotFire.calm())
-				victory.pool = pool
-				victory.crowd = crowd
-				victory.style = stand_style
-				victory.score = [int(flow.state.score[0]), int(flow.state.score[1])]
-				victory.paint_body = func(ci: CanvasItem, v: PoolView, sw: Swimmer): PoolArt.draw_body(ci, v, sw, _cap(sw), _trim(sw), _design(sw))
 			Sfx.play("cheer" if won else "miss")
 
 ## A counter's callout with its numbers: "3 ON 2 BREAK!", "GET BACK! 2 ON 1".
@@ -368,14 +332,18 @@ static func _break_text(word: String, p: Play) -> String:
 
 func _tick_sprint(dt: float) -> void:
 	var was := sprint.whistled
+	if sim and sprint.started() and not sprint.done:
+		# SIM: your sprinter swims as theirs does (his speed, no taps): the boost that gives it
+		var jet := Sprint.JET_BONUS if Traits.has(sprint.ours.player, "jet") else 0.0
+		sprint.boost = clampf(sim_sprint - Sprint.BASE_SPEED - jet, 0.0, Sprint.MAX_BOOST) + dt * Sprint.BOOST_DECAY
 	sprint.step(dt)
-	view.follow(sprint.focus(), dt)
+	view.follow(sprint.focus(), dt * _cam_rate())
 	if sprint.whistled and not was:
 		Sfx.play("whistle")
 	# (the bot's tapping keeps its own time from the sprint's start: a presentation before it, or a
 	# frame's real length, must not be able to change who wins it)
 	bot_sprint_t = bot_sprint_t + dt if sprint.started() else 0.0
-	if autoplay and sprint.started() and int(bot_sprint_t * 12.0) % 2 == 0:
+	if autoplay and not sim and sprint.started() and int(bot_sprint_t * 12.0) % 2 == 0:
 		sprint.tap()
 	if sprint.done and sprint_end < 0.0:
 		sprint_end = 1.0
@@ -389,7 +357,9 @@ func _tick_sprint(dt: float) -> void:
 func _tick_attack(dt: float) -> void:
 	var p := flow.play
 	var scale := SLOWMO if ((aim.active and aim.stick and p.can_throw()) or calls.open) else 1.0
-	if autoplay:
+	if sim:
+		pass   # (the computer's brain plays it: MatchFlow.sim_us)
+	elif autoplay:
 		_bot(dt)
 	else:
 		_stick_aim(p)
@@ -419,7 +389,12 @@ func _follow(focus: Vector2, dt: float) -> void:
 	if goal_show.active():
 		view.zoom_to = goal_show.zoom()
 		focus = goal_show.focus()
-	view.follow(focus, dt)
+	view.follow(focus, dt * _cam_rate())
+
+## The camera's share of a frame's match time: all of it in play; in SIM never more than SIM_CAM
+## times a real frame, so the fast-forward is watched from a steady camera.
+func _cam_rate() -> float:
+	return 1.0 if not sim else minf(1.0, SIM_CAM / maxf(sim_rate, 1.0))
 
 func _bot(dt: float) -> void:
 	bot_think -= dt
@@ -457,23 +432,27 @@ func _handle_events() -> void:
 	for e in flow.events:
 		match String(e.k):
 			"pass":
-				Sfx.play("stroke", 1.3, -6.0)
+				if not sim:   # (SIM: the small sounds would chatter at speed)
+					Sfx.play("stroke", 1.3, -6.0)
 			"catch":
-				Sfx.play("touch", 1.1, -8.0)
+				if not sim:
+					Sfx.play("touch", 1.1, -8.0)
 			"drive":
 				if not defending:
 					banner.show("DRIVE %s!" % CallStrip.LABELS.get(e.side, ""), EventBanner.YELLOW)
 			"windup":
-				banner.show("HE'S SHOOTING!", EventBanner.RED)
+				if defending:   # (SIM: your own shooter winds up on the same brain)
+					banner.show("HE'S SHOOTING!", EventBanner.RED)
 			"ball_down":
-				Sfx.play("splash", 1.6, -12.0)
+				if not sim:
+					Sfx.play("splash", 1.6, -12.0)
 			"shot":
 				if float(e.get("catch_shoot", 0.0)) > 0.0:
 					Sfx.play("splash", 0.9, 2.5)   # a catch and shoot: a touch heavier
-					Game.vibrate(22)
+					_vibrate(22)
 				else:
 					Sfx.play("splash")
-					Game.vibrate(15)
+					_vibrate(15)
 			"save":
 				Sfx.play("gasp")
 			"rebound":
@@ -481,14 +460,14 @@ func _handle_events() -> void:
 				_rebound(String(e.text))
 			"block":
 				Sfx.play("turn")
-				Game.vibrate(20)
+				_vibrate(20)
 				banner.event("block")
 			"foul":
 				Sfx.play("whistle", 1.15, -5.0)
 				banner.event("foul")
 			"tip":
 				Sfx.play("turn")
-				Game.vibrate(12)
+				_vibrate(12)
 				banner.show("TIPPED!")
 			"exclusion":
 				Sfx.play("whistle")
@@ -567,7 +546,7 @@ func _defense_end(outcome: String, r: Dictionary) -> void:
 			broadcast.save(flow.play.keeper.player, flow.us, int(flow.state.saves[0]))
 			Sfx.play("cheer")
 			Sfx.play("perfect")
-			Game.vibrate(30)
+			_vibrate(30)
 			excite = 0.8
 		"miss":
 			banner.show("WIDE!")
@@ -578,7 +557,7 @@ func _defense_end(outcome: String, r: Dictionary) -> void:
 			else:
 				banner.event("turnover")
 			Sfx.play("cheer")
-			Game.vibrate(25)
+			_vibrate(25)
 			excite = 0.6
 		"turnover":
 			banner.event("turnover")
@@ -620,15 +599,10 @@ func _start_goal(side: int, who: PoloPlayer, at: Vector2, decides: bool = false,
 	var team := flow.us if side == 0 else flow.them
 	var col := _us_cap() if side == 0 else flow.them.cap_against(_us_cap())
 	goal_show.start(side, who, flow.state, Colleges.short_name(team).to_upper(), col, at, decides, pre)
-	replay_goal = true
-	replay_who = who
-	replay_side = side
-	goal_fx.start(Store.looks.worn("goal"), goal_show, team.c1, team.c2, HotFire.calm())
+	goal_fx.start(GoalFx.equipped(), goal_show, team.c1, team.c2, HotFire.calm())
 	var sc: Array = flow.state.score.duplicate()
 	sc[side] = int(sc[side]) + 1
 	broadcast.goal(who, team, goal_show.goals_today, (flow.state.shot_by[side] as Array).count(who), "%d-%d" % [int(sc[0]), int(sc[1])])
-	if goal_fx.level >= 3 and team == _home_team():
-		excite = GoalFx.EXCITE[goal_fx.level - 1]   # (a louder crowd for the home side's goal)
 	excite = maxf(excite, 1.0) if side == 0 else excite
 
 ## The ball's in play and something's being controlled: broadcast graphics stay off the screen.
@@ -672,6 +646,11 @@ func _skip_goal() -> bool:
 	Sfx.play("click")
 	return true
 
+## The phone's buzz for a moment in play (never in SIM: it's a broadcast you're watching).
+func _vibrate(ms: int) -> void:
+	if not sim:
+		Game.vibrate(ms)
+
 ## A loose ball off the keeper or the woodwork: a parry is a save.
 func _rebound(text: String) -> void:
 	if text == "PARRIED!":
@@ -688,24 +667,29 @@ func _is_steal(outcome: String, r: Dictionary) -> bool:
 func _input(event: InputEvent) -> void:
 	if paused:
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8 \
+			and bool(Game.settings.get("dev_mode", false)):
+		cycle_board()   # (Developer Mode: the next scoreboard tier; the match never notices)
+		get_viewport().set_input_as_handled()
+		return
+	if sim:
+		# SIM: nothing reaches the match; the PAUSE control (or Esc) stops the broadcast
+		if event is InputEventScreenTouch and event.pressed and jump_rect.has_point(event.position):
+			if jump_down <= 0.0:
+				Sfx.play("click")
+				jump_down = JUMP_PRESS   # (pressed in for a moment, then _process hands over)
+				canvas.queue_redraw()
+		elif event is InputEventScreenTouch and event.pressed and (sim_rect.has_point(event.position) or pause_rect.has_point(event.position)):
+			_sim_pause()
+		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			_sim_pause()
+		get_viewport().set_input_as_handled()
+		return
 	if intro != null:
 		# any tap, click or key skips the entrance (the match then starts, once)
 		if (event is InputEventScreenTouch or event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
 			intro.skip()
 			_end_intro()
-			get_viewport().set_input_as_handled()
-		return
-	if replay != null:
-		# any tap, click or key skips a replay; the match carries on from where it stopped
-		if (event is InputEventScreenTouch or event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
-			replay.skip()
-			_end_replay()
-			get_viewport().set_input_as_handled()
-		return
-	if victory != null:
-		if (event is InputEventScreenTouch or event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
-			victory.skip()
-			_end_victory()
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventScreenTouch:
@@ -757,7 +741,7 @@ func _press(pos: Vector2, index: int) -> void:
 		MatchFlow.Phase.DEFENSE:
 			# you're the keeper: as he winds up or once he's shot, a tap on the goal's left, centre
 			# or right is your dive (he tracks the ball by himself until then, and never dives for you).
-			# Otherwise a tap on the bar along the bottom is your formation call (FormationBar).
+			# Otherwise a tap on CALL DROP, bottom right, calls your drop (FormationBar).
 			if flow.can_dive():
 				flow.dive_side(_dive_zone(pos.y))
 				Sfx.play("splash", 1.3, -6.0)
@@ -807,7 +791,7 @@ func _release() -> void:
 ## its way to one of yours (catch and shoot: the throw goes on release, once he has it). Down,
 ## it's nothing: a touch there is a touch on the water.
 func _stick_ready(p: Play) -> bool:
-	return p != null and flow.phase == MatchFlow.Phase.ATTACK and not p.over and not autoplay \
+	return p != null and flow.phase == MatchFlow.Phase.ATTACK and not p.over and not autoplay and not sim \
 		and (p.can_throw() or (p.ball.state == Ball.State.PASS and p.ball.receiver != null and p.attackers.has(p.ball.receiver)))
 
 ## The stick's knob, as a slingshot pull from wherever the shooter is now (AimGuide.stick_at).
@@ -839,30 +823,109 @@ func _pause() -> void:
 	paused = true
 	aim.cancel()
 	calls.open = false
-	var quit: Array = ["QUIT MATCH", func():
+	var opts: Array = [
+		["RESUME", func(): paused = false, "primary"],
+		["SIM", _start_sim],
+		_quit_button(),
+	]
+	if bool(Game.settings.get("dev_mode", false)):   # Developer Mode: the scoreboard's tiers, on the spot
+		opts.insert(1, ["BOARD %d" % Scoreboard.tier(), func():
+			cycle_board()
+			_pause.call_deferred()])
+		if not stand_style.is_empty():   # ...and the Crowd Atmosphere levels
+			opts.insert(2, ["CROWD %d" % int(stand_style.lv), func():
+				cycle_crowd()
+				_pause.call_deferred()])
+	Game.dialog("PAUSED", _score_line(), opts)
+
+## Developer Mode: the next scoreboard tier for the rest of the session (Scoreboard.override,
+## never saved). Only the drawing changes: the match, its clocks and its score carry on as they were.
+func cycle_board() -> void:
+	if not bool(Game.settings.get("dev_mode", false)):
+		return
+	Scoreboard.override = Scoreboard.tier() % Scoreboard.TOP + 1
+	Game.toast("SCOREBOARD: TIER %d %s" % [Scoreboard.override, Scoreboard.NAMES[Scoreboard.override - 1]], UI.GOLD)
+
+## Developer Mode: the next Crowd Atmosphere level in this match (CrowdArt.override, never saved,
+## nothing owned). The same seats for the same level: only the stands' picture changes. The
+## entrance shares the dict, so it follows.
+func cycle_crowd() -> void:
+	if not bool(Game.settings.get("dev_mode", false)) or stand_style.is_empty():
+		return
+	CrowdArt.override = int(stand_style.lv) % CrowdArt.TOP + 1
+	var st := CrowdArt.style(CrowdArt.override, stand_style.home, stand_style.away, bool(stand_style.neutral), crowd, bool(stand_style.calm),
+		1 if bool(stand_style.big) else 0, crowd_seed)
+	stand_style.merge(st, true)
+	Game.toast("CROWD: LEVEL %d %s" % [CrowdArt.override, CrowdArt.NAMES[CrowdArt.override - 1]], UI.GOLD)
+
+func _score_line() -> String:
+	return "%s %d - %d %s" % [Colleges.short_name(flow.us), flow.state.score[0], flow.state.score[1], Colleges.short_name(flow.them)]
+
+## The pause menu's last button: SIM TO END in a career, QUIT MATCH otherwise.
+func _quit_button() -> Array:
+	if career:
+		return ["SIM TO END", _sim_to_end, "danger"]
+	return ["QUIT MATCH", func():
 		Sfx.crowd(0.0)
 		Game.goto("title")]
-	if career:
-		quit = ["FORFEIT", _forfeit, "danger"]
-	Game.dialog("PAUSED", "%s %d - %d %s" % [Colleges.short_name(flow.us), flow.state.score[0], flow.state.score[1], Colleges.short_name(flow.them)], [
-		["RESUME", func(): paused = false, "primary"],
-		quit,
-	])
 
-## Career: walking off counts as a loss (by at least a goal).
-func _forfeit() -> void:
-	Game.dialog("FORFEIT?", "Leaving now counts as a loss.", [
-		["FORFEIT", _forfeit_now, "danger"],
-		["KEEP PLAYING", func(): paused = false, "primary"]])
+## Career: SIM TO END asks first (the match stays paused, untouched, while it's up).
+func _sim_to_end() -> void:
+	paused = true
+	Game.dialog("SIM TO END?", "Are you sure you want to simulate the rest of this game? You will not be able to return to gameplay once the simulation begins.", [
+		["CANCEL", _sim_to_end_cancel, "primary"],
+		["SIM TO END", _sim_to_end_now, "danger"]], "danger")
 
-func _forfeit_now() -> void:
-	if flow.phase == MatchFlow.Phase.FINAL:
-		_to_career()   # too late to forfeit: the result stands
+## CANCEL: back to the pause menu it came from, nothing changed.
+func _sim_to_end_cancel() -> void:
+	if sim_ends > 0:
 		return
-	var st := flow.state
-	st.score[1] = maxi(st.score[1], st.score[0] + 1)
-	st.in_shootout = false
-	_to_career()
+	paused = false   # (only so the menu can open again: no frame runs in between)
+	if sim:
+		_sim_pause()
+	else:
+		_pause()
+
+## SIM TO END confirmed: the rest of the match worked out at once (SimFinish: the scoring engine's
+## numbers for the time left, from exactly where the match is: score, clocks, possession, fouls,
+## exclusions, the box score, nothing reset), then the final whistle in the same call: the
+## full-time panel and the career's postgame, as a played game. No frames of play, no loading
+## screen, no win celebration in between. Once.
+func _sim_to_end_now() -> void:
+	if sim_ends > 0 or handed_over:
+		return
+	if flow.phase == MatchFlow.Phase.FINAL:
+		paused = false   # (already over: the result stands)
+		return
+	var t0 := Time.get_ticks_usec()
+	sim_ends += 1
+	if sim:
+		_end_sim()
+	_settle_for_sim_end()
+	aim.cancel()
+	calls.open = false
+	halftime.open = false
+	SimFinish.run(flow, neutral_site, flow.rng.randi())
+	paused = false
+	_frame(0.0)   # full time: _enter_phase puts the results up
+	sim_end_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	canvas.queue_redraw()
+
+## Before SIM TO END: whatever has already happened is counted, the way the next frames would
+## have (a goal under its show, a possession's end held for its banner, their penalty's
+## result): the box score and score SimFinish carries on from are the whole of the match so far.
+## A possession still live is cut where it is (what it did stands; the rest is SimFinish's).
+func _settle_for_sim_end() -> void:
+	_end_goal_show()
+	if flow.phase == MatchFlow.Phase.THEIR_SHOT and flow.duel != null and duel_end >= 0.0:
+		duel_end = -1.0
+		flow.duel_done()
+	elif flow.play != null and (end_timer >= 0.0 or flow.play.over):
+		end_timer = -1.0
+		if flow.phase == MatchFlow.Phase.ATTACK:
+			flow.attack_done()
+		elif flow.phase == MatchFlow.Phase.DEFENSE:
+			flow.defense_done()
 
 ## Career: hand the box score to the career and show the game summary (once).
 func _to_career() -> void:
@@ -875,10 +938,270 @@ func _to_career() -> void:
 	Game.save_career()
 	Game.goto("game_summary")
 
+# ------------------------------------------------------------------ LIVE SIM
+## A real frame of SIM: the match on at sim_rate, in fixed SIM_STEP steps (the speed eased
+## towards _sim_target; never more than SIM_MAX_STEPS or SIM_BUDGET_MS a frame, and a device that
+## can't keep up backs the speed off by itself), then what SIM does by itself between steps.
+func _sim_process(dt: float) -> void:
+	dt = minf(dt, 0.1)   # (a hitch is never paid back as a burst)
+	sim_t += dt
+	sim_real += dt
+	sim_in = maxf(0.0, sim_in - dt / SIM_IN)
+	var target := _sim_target()
+	var k := SIM_EASE_DOWN if target < sim_rate else SIM_EASE_UP
+	sim_rate = lerpf(sim_rate, target, 1.0 - exp(-k * dt))
+	if absf(sim_rate - target) < 0.05:
+		sim_rate = target
+	sim_acc += dt * sim_rate
+	var t0 := Time.get_ticks_usec()
+	var n := 0
+	while sim and not paused and sim_acc >= SIM_STEP and n < SIM_MAX_STEPS:
+		_frame(SIM_STEP)
+		sim_acc -= SIM_STEP
+		n += 1
+		sim_steps += 1
+		if (Time.get_ticks_usec() - t0) > SIM_BUDGET_MS * 1500.0:
+			break   # (well over budget: the frame goes out now)
+	sim_acc = minf(sim_acc, SIM_STEP)   # (what didn't fit is dropped, not owed)
+	if sim and flow.phase == MatchFlow.Phase.FINAL:
+		_frame(0.0)   # full time in the last step: SIM ends now, not a frame later (_enter_phase)
+	if n >= 4:
+		var ms := (Time.get_ticks_usec() - t0) / 1000.0
+		if ms > SIM_BUDGET_MS:
+			sim_cap = maxf(SIM_SPEED_MIN, sim_cap - 0.5)
+		elif ms < SIM_BUDGET_MS * 0.4:
+			sim_cap = minf(SIM_SPEED, sim_cap + dt)
+	if not sim:
+		return
+	# JUMP IN pressed: a moment showing pressed in, then control comes back (RETURN TO GAME)
+	if jump_down > 0.0:
+		jump_down -= dt
+		if jump_down <= 0.0:
+			jump_down = 0.0
+			_sim_return_now()
+			if not sim:
+				return
+	# a quarter break: its card for a moment, then on (the halftime adjustment stays yours to make
+	# only when you're playing)
+	if flow.phase == MatchFlow.Phase.BREAK:
+		sim_break_t += dt
+		halftime.open = false
+		if sim_break_t >= SIM_BREAK and not sim_return:
+			sim_break_t = 0.0
+			flow.break_done()
+	else:
+		sim_break_t = 0.0
+	if sim_return and _sim_safe():
+		_end_sim()
+	canvas.queue_redraw()
+
+## How fast SIM wants to run now (x normal): a goal's show slowly enough to see it, a shot and the
+## whistle after a possession a little slower, everything else flat out. RETURN TO GAME on its way:
+## normal speed until it hands over.
+func _sim_target() -> float:
+	if sim_return:
+		return 1.0
+	if goal_show.active():
+		return SIM_GOAL
+	var top := sim_cap
+	match flow.phase:
+		MatchFlow.Phase.ATTACK, MatchFlow.Phase.DEFENSE:
+			var p := flow.play
+			if p != null:
+				if p.ball.state == Ball.State.SHOT or flow.duel != null or bool(flow.opp_plan.get("shot", false)):
+					return minf(SIM_SHOT, top)
+				if p.over or end_timer >= 0.0:
+					return minf(SIM_HOLD, top)
+		MatchFlow.Phase.THEIR_SHOT:
+			return minf(SIM_SHOT, top)
+		MatchFlow.Phase.SHOOTOUT_THEM:
+			return minf(SIM_HOLD, top)
+		MatchFlow.Phase.SPRINT:
+			if sprint_end >= 0.0:
+				return minf(SIM_HOLD, top)
+		MatchFlow.Phase.BREAK:
+			return 1.0
+	return top
+
+## The pause menu's SIM: from exactly where the match is, the computer takes your side and the
+## broadcast starts. The score, the clocks, the possession, everybody's place: all as they were.
+func _start_sim() -> void:
+	paused = false
+	if flow.phase == MatchFlow.Phase.FINAL or sim:
+		return
+	sim = true
+	sim_runs += 1
+	sim_return = false
+	sim_rate = 1.0   # (from normal speed: the tape spins up)
+	sim_acc = 0.0
+	sim_in = 1.0
+	sim_t = 0.0
+	sim_break_t = 0.0
+	aim.cancel()
+	calls.open = false
+	halftime.open = false
+	flow.set_sim(true)
+	sim_keeper = _sim_keeper_skill()
+	flow.auto_keeper = sim_keeper
+	sim_sprint = MatchFlow.sprint_speed_of(flow.us, bot_rng)
+	Sfx.play("card", 1.3, -6.0)
+
+## The pointing hand over JUMP IN (the match canvas takes no mouse itself, so it's set by hand).
+func _jump_cursor(on: bool) -> void:
+	if on != jump_hand:
+		jump_hand = on
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if on else Input.CURSOR_ARROW)
+
+func _exit_tree() -> void:
+	_jump_cursor(false)
+
+## SIM off (RETURN TO GAME once it's safe, or full time): your side's yours again, at normal
+## speed, the HUD and controls back, from wherever the match got to.
+func _end_sim() -> void:
+	_jump_cursor(false)
+	jump_down = 0.0
+	if not sim:
+		return
+	sim = false
+	sim_return = false
+	sim_rate = 1.0
+	sim_acc = 0.0
+	flow.set_sim(false)
+	flow.auto_keeper = duel_skill if autoplay else -1.0
+	aim.cancel()
+
+## Your keeper's dive timing on the bot: his own Lunge Speed (his reactions, Hot / Cold and all),
+## about the tests' even 0.5 for an average keeper. His saves are still his attributes' (KeeperDuel).
+func _sim_keeper_skill() -> float:
+	return clampf(0.35 + 0.3 * Attributes.keeper_skill(flow.us.keeper(), "lun"), 0.3, 0.7)
+
+## Can control come back now? Only with the ball live and nothing in the air or being settled:
+## never during a goal's show, a whistle's hold, a shot or its wind-up, a penalty's duel, or a
+## sprint already under way. A break, the sprint's countdown and their shootout card are fine.
+func _sim_safe() -> bool:
+	if goal_show.active() or end_timer >= 0.0:
+		return false
+	match flow.phase:
+		MatchFlow.Phase.ATTACK, MatchFlow.Phase.DEFENSE:
+			var p := flow.play
+			return p != null and not p.over and flow.duel == null and p.ball.state != Ball.State.SHOT \
+				and not bool(flow.opp_plan.get("shot", false)) and flow.keeper_anim == null
+		MatchFlow.Phase.SPRINT:
+			return sprint != null and not sprint.started()
+		MatchFlow.Phase.BREAK, MatchFlow.Phase.SHOOTOUT_THEM, MatchFlow.Phase.FINAL:
+			return true
+	return false
+
+## SIM's own pause: carry on watching, take your team back, or the usual way out.
+func _sim_pause() -> void:
+	if paused or not sim:
+		return
+	paused = true
+	Game.dialog("SIM PAUSED", _score_line(), [
+		["CONTINUE SIM", func(): paused = false, "primary"],
+		["RETURN TO GAME", _sim_return_now],
+		_quit_button(),
+	])
+
+## RETURN TO GAME: control back now if it's safe, otherwise at the next safe moment (normal speed
+## until then: _sim_target).
+func _sim_return_now() -> void:
+	paused = false
+	if not sim:
+		return
+	sim_return = true
+	if _sim_safe():
+		_end_sim()
+
+## The speed SIM has managed so far: match seconds a real second (tests, the report).
+func sim_speed() -> float:
+	return sim_steps * SIM_STEP / sim_real if sim_real > 0.0 else 0.0
+
+## The broadcast look, over everything and kept faint: a dark edge, light scanlines, the tag in
+## the corner (SIM, ▶▶ at speed / ▶ slowed down, the speed) with the PAUSE control beside it, and
+## the TV coming on at the start.
+func _draw_sim(ci: Control, size: Vector2) -> void:
+	# the screen edge, a few pixels darker
+	for i in 6:
+		ci.draw_rect(Rect2(i, i, size.x - 2 * i, size.y - 2 * i), Color(0.0, 0.02, 0.08, 0.16 * (1.0 - i / 6.0)), false, 1.0)
+	# scanlines: one dark row in three
+	var y := 1.0
+	var line := Color(0.0, 0.0, 0.05, 0.045)
+	while y < size.y:
+		ci.draw_rect(Rect2(0, y, size.x, 1), line)
+		y += 3.0
+	var ins := _insets()
+	# the tag, bottom left (where your man's tag is in play): SIM and the fast-forward arrows (they
+	# chase at speed; one, still, slowed down)
+	var fast := sim_rate >= SIM_HOLD - 0.01 and not sim_return
+	var word := "RETURNING" if sim_return else "SIM"
+	var tw := UI.text_width(word, 8, "caps")
+	var tag := Rect2(ins.x + 4, size.y - 17, tw + (UI.text_width("%dX" % roundi(sim_rate), 8, "caps") + 28 if fast else 21), 13)
+	ci.draw_rect(tag, Color(Hud.PANEL_BG, 0.9))
+	ci.draw_rect(tag, Color(UI.BORDER, 0.85), false, 1.0)
+	var dot := Color(UI.BAD, 1.0 if int(sim_t * 2.0) % 2 == 0 else 0.45)   # (the broadcast light)
+	ci.draw_rect(Rect2(tag.position + Vector2(4, 5), Vector2(3, 3)), dot)
+	UI.text(ci, tag.position + Vector2(10, 10), word, 8, UI.TEXT, "caps")
+	var ax := tag.position.x + 12 + tw
+	var ay := tag.position.y + 3
+	var arrows := 2 if fast else 1
+	for i in arrows:
+		var lit := not fast or int(sim_t * 8.0) % 2 == i
+		var c := Color(UI.GOLD, 1.0 if lit else 0.5)
+		var x0 := ax + i * 5
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x0, ay), Vector2(x0 + 5, ay + 3.5), Vector2(x0, ay + 7)]), c)
+	if fast:
+		UI.text(ci, Vector2(ax + 12, tag.position.y + 10), "%dX" % roundi(sim_rate), 8, UI.DIM, "caps")
+	# PAUSE, where the pause button always is (the same chunky little panel)
+	if flow.phase != MatchFlow.Phase.FINAL:
+		var pw := UI.text_width("PAUSE", 8, "caps") + 10
+		sim_rect = Rect2(size.x - ins.y - 4 - pw, 3, pw, 19)
+		ci.draw_rect(sim_rect, UI.PANEL)
+		ci.draw_rect(sim_rect, UI.BORDER, false, 1.0)
+		UI.text(ci, sim_rect.position + Vector2(5, 13), "PAUSE", 8, UI.TEXT, "caps")
+	# JUMP IN, bottom right (opposite the tag): your team back from this very moment. Gone once
+	# it's been pressed (the tag reads RETURNING until control is safely handed over).
+	jump_rect = Rect2()
+	if flow.phase != MatchFlow.Phase.FINAL and not sim_return:
+		var tw2 := UI.text_width("JUMP IN", 8, "caps")
+		var jw := tw2 + 26   # (room for the chevron)
+		jump_rect = Rect2(size.x - ins.y - 7 - jw, size.y - 28, jw, 21)
+		var hover := jump_rect.has_point(ci.get_local_mouse_position())
+		_jump_cursor(hover)
+		# a soft pulse around it (it's the one thing on the broadcast you can press)
+		var pulse := 0.5 + 0.5 * sin(sim_t * 4.0)
+		if jump_down <= 0.0:
+			for i in 2:
+				var g := jump_rect.grow(2 + i)
+				ci.draw_rect(g, Color(UI.GOLD, (0.45 - 0.2 * i) * (0.35 + 0.65 * pulse)), false, 1.0)
+		var mode := "down" if jump_down > 0.0 else ("hover" if hover else "normal")
+		var face := Deck.button_face(ci, jump_rect, UI.GOLD, UI.INK, mode)
+		var tx := face.position.x + 7
+		UI.text(ci, Vector2(tx, face.position.y + 14), "JUMP IN", 8, UI.INK, "caps")
+		# the chevron, nudging right on hover (PLAY GAME's >)
+		var cx := tx + tw2 + 5 + (1.0 if hover else 0.0)
+		var cy := face.position.y + 6
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(cx, cy), Vector2(cx + 5, cy + 4.5), Vector2(cx, cy + 9)]), UI.INK)
+	else:
+		_jump_cursor(false)
+	# the TV coming on: a bright line that opens into the picture
+	if sim_in > 0.0:
+		var u := 1.0 - sim_in
+		var open := size.y * u * u
+		var top := (size.y - open) * 0.5
+		var cover := Color(0.0, 0.02, 0.06, 0.85 * sim_in)
+		ci.draw_rect(Rect2(0, 0, size.x, top), cover)
+		ci.draw_rect(Rect2(0, top + open, size.x, size.y - top - open), cover)
+		ci.draw_rect(Rect2(0, top - 1, size.x, 1), Color(1, 1, 1, 0.7 * sim_in))
+		ci.draw_rect(Rect2(0, top + open, size.x, 1), Color(1, 1, 1, 0.7 * sim_in))
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if not paused and flow.phase in [MatchFlow.Phase.ATTACK, MatchFlow.Phase.DEFENSE] and not autoplay:
-			_pause()
+			if sim:
+				_sim_pause()
+			else:
+				_pause()
 	elif what == NOTIFICATION_WM_GO_BACK_REQUEST and not paused:
 		if flow.phase == MatchFlow.Phase.FINAL:
 			# the game is over: Back means "continue", never "forfeit"
@@ -886,6 +1209,8 @@ func _notification(what: int) -> void:
 				_to_career()
 			else:
 				Game.goto("title")
+		elif sim:
+			_sim_pause()
 		else:
 			_pause()
 
@@ -895,18 +1220,13 @@ func _draw_all(ci: Control) -> void:
 	if intro != null:
 		intro.draw(ci, size)
 		return
-	if replay != null:
-		replay.draw(ci, size)
-		return
-	if victory != null:
-		victory.draw(ci, size)
-		return
 	if not stand_style.is_empty():
 		stand_style["close"] = flow.state.quarter >= 4 and absi(int(flow.state.score[0]) - int(flow.state.score[1])) <= 1
 	# the world layer, through the 6 on 5 push in (ManUpCam: one transform, the identity at rest);
 	# the HUD after it is drawn straight
 	ci.draw_set_transform_matrix(view.cine)
 	PoolArt.draw_pool(ci, view, t, size, excite, pool, crowd, _net(), stand_style)
+	goal_fx.draw_world(ci, view)   # (the celebration's poppers, rockets and ripples: under the swimmers)
 	var bodies: Array[Swimmer] = []
 	if flow.phase == MatchFlow.Phase.SPRINT and sprint:
 		bodies = sprint.bodies()
@@ -919,7 +1239,7 @@ func _draw_all(ci: Control) -> void:
 	var dp: Play = flow.play if flow.phase == MatchFlow.Phase.DEFENSE else null
 	if dp != null:
 		DefenseView.draw_under(ci, view, dp, t)
-	if p != null and p.can_throw():
+	if p != null and p.can_throw() and not sim:
 		for a in p.attackers:
 			if a != p.holder and (p.openness(a) > 1.8 and Geo.range_to_goal(a.pos) < 9.0 \
 					or p.center_entry(p.holder.pos, a) == "open"):   # (the centre, his guard on the other side)
@@ -953,14 +1273,16 @@ func _draw_all(ci: Control) -> void:
 		if glow > 0.0:
 			PoolArt.draw_catch_glow(ci, view, flow.play.ball, glow)
 	if p != null:
-		if p.holder != null and p.holder.side == Swimmer.Side.US and not p.over:
+		if p.holder != null and p.holder.side == Swimmer.Side.US and not p.over and not sim:
 			PoolArt.draw_holder_marker(ci, view, p.holder, t)
 		aim.draw(ci, view, p, t)
 	if dp != null:
 		DefenseView.draw_over(ci, view, dp, flow.duel, t)
 	ci.draw_set_transform_matrix(Transform2D.IDENTITY)
-	goal_fx.draw(ci, size, view)   # (the screen's confetti and lights: never scaled)
+	goal_fx.draw(ci, size, view)   # (the celebration over the goal: over everything, the HUD aside)
 	_draw_hud(ci, size)
+	if sim:
+		_draw_sim(ci, size)
 
 ## A goal's ball in the net, for drawing the net give (PoolArt.draw_pool).
 func _net() -> Dictionary:
@@ -979,7 +1301,7 @@ func _net_hit(ours: bool) -> void:
 	Sfx.play("touch", 0.8, -3.0 if ours else -9.0)
 	view.shake = maxf(view.shake, 0.6)   # a jolt as the net takes it
 	if ours:
-		Game.vibrate(25)
+		_vibrate(25)
 
 func _sprint_ball() -> Ball:
 	var b := Ball.new()
@@ -1011,42 +1333,74 @@ func _us_cap() -> Color:
 func _design(s: Swimmer) -> String:
 	return Caps.selected() if (_ours(s) and not s.keeper) else ""
 
+## The bottom-left tag's man: Play.holder's player, whichever side he's on (their man on the
+## ball while you defend, a keeper only once he has it). While nobody has it (a pass, a shot, a
+## loose ball) the last man to hold it this possession stays up; a new possession starts clean.
+## `_tag_room`: the widest tag this possession could show (its attackers, its keeper), so CALL
+## DROP keeps one place while the ball moves.
+var _tag_play: Play = null
+var _tag_player: PoloPlayer = null
+var _tag_room := 0.0
+
+func _tag_holder(p: Play) -> PoloPlayer:
+	if p != _tag_play:
+		_tag_play = p
+		_tag_player = null
+		_tag_room = 0.0
+		for s in p.attackers:
+			_tag_room = maxf(_tag_room, Hud.tag_parts(s.player).size.x)
+		if p.keeper != null:
+			_tag_room = maxf(_tag_room, Hud.tag_parts(p.keeper.player).size.x)
+	if p.holder != null:
+		_tag_player = p.holder.player
+	return _tag_player
+
 func _draw_hud(ci: Control, size: Vector2) -> void:
 	var ins := _insets()
+	var tier := Scoreboard.tier()   # (read every frame: Developer Mode can switch it mid-match)
 	var board := Hud.scoreboard(ci, size.x, flow.state, flow.us, flow.them, _us_cap(), flow.them.cap_against(_us_cap()),
-		flow.them.trim_against(_us_cap()), goal_show.board_fx())
+		flow.them.trim_against(_us_cap()), goal_show.board_fx(), tier)
+	var under := Scoreboard.below(board)
 	pause_rect = Rect2(size.x - ins.y - 24, 3, 20, 19)
-	if flow.phase != MatchFlow.Phase.FINAL:
+	sim_rect = Rect2()
+	jump_rect = Rect2()
+	if flow.phase != MatchFlow.Phase.FINAL and not sim:
 		Hud.pause_button(ci, pause_rect)
 	var p: Play = flow.play if flow.phase == MatchFlow.Phase.ATTACK else null
 	if p != null:
 		calls.layout(stick.area())
-		calls.draw(ci, view, p, t)
+		if not sim:
+			calls.draw(ci, view, p, t)
 		if p.kind != Play.Kind.PENALTY:
-			Hud.shot_clock(ci, Vector2(board.position.x - 34, 2), p.shot_clock)
+			var sc := Scoreboard.shot_clock(ci, tier, board, minf(p.shot_clock, flow.state.clock))   # (never more than the game clock has left)
 			if p.formation_locked or p.ai_drop >= 0:   # (their defence: PRESS, or its drop once called)
-				Hud.formation_tag(ci, Vector2(board.position.x - 3, 25), DefenseFormation.NAMES[p.formation])
+				Hud.formation_tag(ci, Vector2(sc.end.x + 1.0, maxf(under, sc.end.y + 2.0)), DefenseFormation.NAMES[p.formation])
 		if p.man_up > 0.0 and not p.over:
-			Hud.man_up(ci, size.x, p.man_up)
-		if p.holder != null and p.holder.side == Swimmer.Side.US:
-			Hud.holder_tag(ci, Vector2(ins.x + 3, size.y - 15), p.holder.player, flow.state.pf_of(p.holder.player))
-		stick.draw(ci, aim.stick)
+			Hud.man_up(ci, size.x, p.man_up, false, under)
+		var hp := _tag_holder(p)
+		if hp != null and not sim:
+			Hud.holder_tag(ci, Vector2(ins.x + 3, size.y - 15), hp)
+		if not sim:
+			stick.draw(ci, aim.stick)
 	var dp: Play = flow.play if flow.phase == MatchFlow.Phase.DEFENSE else null
 	if dp != null:
 		if dp.kind != Play.Kind.PENALTY:
-			Hud.shot_clock(ci, Vector2(board.position.x - 34, 2), dp.shot_clock)
+			Scoreboard.shot_clock(ci, tier, board, minf(dp.shot_clock, flow.state.clock))
 		if dp.man_up > 0.0 and not dp.over:
-			Hud.man_up(ci, size.x, dp.man_up, true)
-		Hud.holder_tag(ci, Vector2(ins.x + 3, size.y - 15), dp.keeper.player, flow.state.pf_of(dp.keeper.player))
-		fbar.layout(size, ins, ins.x + 3 + Hud.tag_parts(dp.keeper.player, flow.state.pf_of(dp.keeper.player)).size.x + 4)
-		fbar.draw(ci, flow, t)
+			Hud.man_up(ci, size.x, dp.man_up, true, under)
+		if not sim:   # (the holder's tag and CALL DROP are controls: SIM plays them)
+			var dh := _tag_holder(dp)
+			if dh != null:
+				Hud.holder_tag(ci, Vector2(ins.x + 3, size.y - 15), dh)
+			fbar.layout(size, ins, ins.x + 3 + _tag_room + 4)
+			fbar.draw(ci, flow, t)
 	if flow.phase == MatchFlow.Phase.SPRINT and sprint:
-		_draw_sprint_hud(ci, size)
+		_draw_sprint_hud(ci, size, under)
 	banner.draw(ci, size)
 	bar_show.draw(ci, size, view)
-	goal_show.draw(ci, size, view)
+	goal_show.draw(ci, size)
 	broadcast.board_sweep(ci, board, goal_show)
-	broadcast.draw(ci, size, _live(), goal_show.active() and goal_show.top > GoalShow.TEXT_TOP, flow.state)
+	broadcast.draw(ci, size, _live(), flow.state)
 	Hud.dive_note(ci, size, dive_note, t - dive_note_t, goal_show.note_y() if goal_show.active() else -1.0)
 	Hud.roll_note(ci, size, roll_note, t - roll_note_t)
 	match flow.phase:
@@ -1057,12 +1411,12 @@ func _draw_hud(ci: Control, size: Vector2) -> void:
 		MatchFlow.Phase.FINAL:
 			_draw_final(ci, size)
 
-func _draw_sprint_hud(ci: Control, size: Vector2) -> void:
+func _draw_sprint_hud(ci: Control, size: Vector2, under: float = 25.0) -> void:
 	if not sprint.started():
 		var n := int(ceilf(sprint.countdown / 0.6))
 		Hud.banner(ci, size, str(clampi(n, 1, 3)), UI.TEXT, 1.0, "GET READY TO TAP")
 		if career and flow.state.quarter == 1:
-			_venue_pill(ci, size)
+			_venue_pill(ci, size, maxf(30.0, under + 2.0))
 	elif not sprint.done:
 		var pulse := 1.0 if int(t * 8.0) % 2 == 0 else 0.8
 		Hud.banner(ci, size, "TAP TAP TAP!", Color(UI.GOLD, pulse), 1.0, "WIN THE SPRINT FOR THE BALL")
@@ -1084,9 +1438,9 @@ func _draw_their_card(ci: Control, size: Vector2) -> void:
 
 func _draw_break(ci: Control, size: Vector2) -> void:
 	if not flow.state.is_last_quarter():
-		var card := Hud.break_card(ci, size, flow.state.quarter, flow.state.score, flow.us, flow.them)
+		var card := Hud.break_card(ci, size, flow.state.quarter, flow.state.score, flow.us, flow.them, "TAP TO CONTINUE", t - break_t0)
 		broadcast.comparison(ci, size, card, flow.state)
-		if flow.at_halftime():
+		if flow.at_halftime() and not sim:
 			halftime.draw_button(ci, size, card, flow)
 			halftime.draw(ci, size, flow)
 
@@ -1117,12 +1471,12 @@ func _insets() -> Vector2:
 
 ## Career games open with where you're playing: the home team's own pool (its name, the Home
 ## Waters update), or a neutral site.
-func _venue_pill(ci: Control, size: Vector2) -> void:
+func _venue_pill(ci: Control, size: Vector2, y: float = 30.0) -> void:
 	var named := String(Game.match_cfg.get("venue", pool.name))
 	if named == "":
-		Hud.pill(ci, size, "NEUTRAL SITE", UI.ACCENT)
+		Hud.pill(ci, size, "NEUTRAL SITE", UI.ACCENT, y)
 		return
-	Hud.pill(ci, size, ("HOME  -  " if Game.match_cfg.get("home", true) else "AWAY  -  ") + named.to_upper(), UI.ACCENT)
+	Hud.pill(ci, size, ("HOME  -  " if Game.match_cfg.get("home", true) else "AWAY  -  ") + named.to_upper(), UI.ACCENT, y)
 
 # ------------------------------------------------------------------ their shot: you're the keeper
 func _start_duel() -> void:
@@ -1173,7 +1527,9 @@ func _tick_duel(dt: float) -> void:
 		return
 	if not d.done():
 		var game_dt := dt * (d.slowmo if d.state == KeeperDuel.State.FLIGHT else 1.0)
-		if autoplay:
+		if sim:
+			d.bot(game_dt, sim_keeper, bot_rng)
+		elif autoplay:
 			d.bot(game_dt, duel_skill, bot_rng)
 		var was := d.state
 		d.step(game_dt)
@@ -1225,14 +1581,14 @@ func _duel_result(d: KeeperDuel) -> void:
 			banner.event("save")
 			Sfx.play("cheer")
 			Sfx.play("perfect")
-			Game.vibrate(30)
+			_vibrate(30)
 			excite = 0.8
 		"parry":
 			_duel_ball(d, Ball.State.LOOSE)
 			duel_ball.drift = Vector2(signf(d.from.x - d.goal_x) * randf_range(2.5, 4.0), randf_range(-2.5, 2.5))
 			banner.event("save")
 			Sfx.play("gasp")
-			Game.vibrate(20)
+			_vibrate(20)
 		"post":
 			banner.show("OFF THE POST!")
 			Sfx.play("turn")

@@ -61,7 +61,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 ## Seven made-up players (a keeper and six), three stars or so so there's room on the bar for two
 ## red ones. Always the same seven.

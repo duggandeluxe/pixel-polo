@@ -32,6 +32,11 @@ const KEEPER := ["com", "lun", "blk", "leg"]
 const NAMES := {"pas": "Passing", "sho": "Shooting", "str": "Strength", "dfn": "Defense",
 	"com": "Communication", "lun": "Lunge Speed", "blk": "Blocking", "leg": "Leg Strength"}
 const MAX := 10.0
+## DEV RECRUITS (DevRecruits): the two developer players are the only ones whose attributes and
+## ceilings may pass MAX, up to DEV_MAX; their 0-100 ratings up to DEV_LEGACY_TOP (every reader
+## of those clamps or weighs them). Nobody else's cap moves: cap() is MAX for every other player.
+const DEV_MAX := 15.0
+const DEV_LEGACY_TOP := 120
 const PRECISION := 0.0001      # saved to 4 decimals, so OVERALL and POTENTIAL survive a save exactly
 
 # ------------------------------------------------------------------ the 0-100 bridge
@@ -82,6 +87,12 @@ const RELEASE_READ := 0.25         # a release this much quicker (as a share) hi
 const CENTER_WIN_PER_POINT := 0.35
 const SEAL_PER_POINT := 0.05
 const SWITCH_PER_POINT := 0.04
+## DEFENSE at 2MD: the man in the 2MD place (Swimmer.two_md; a 2MD, or a utility put there) has his
+## Defense term count this much more in his positioning only (PlayAI.pos_def: how quickly he
+## re-reads his spot, how soon he switches sides on the centre, how long he holds him off inside
+## water, how soon he fights back round). Never his steals, blocks, fouls, Strength or speed, and
+## never what his card shows. Every one of those keeps its own bounds, so nobody is unbeatable.
+const TWO_MD_POSITIONING := 1.2
 ## STRENGTH vs DEFENSE on the perimeter: the press forces an ordinary foul (D - S) x 4% more often.
 const FOUL_PER_POINT := 0.04
 const FOUL_RANGE := Vector2(0.5, 1.5)
@@ -107,6 +118,21 @@ const WINDOW_PER_POINT := 0.04
 const WINDOW_RANGE := Vector2(0.14, 0.58)    # (0 .. 11: a VERY HOT 10, HOT_TOP)
 
 # ------------------------------------------------------------------ the ratings
+## The most an attribute or ceiling of his can be: MAX, or DEV_MAX for a DEV Recruit.
+static func cap(p: PoloPlayer) -> float:
+	return DEV_MAX if p != null and p.dev_recruit != "" else MAX
+
+## The top of the 0-100 scale the shot reads his shooting rating on (ShotModel's accuracy, Tempo's
+## pace): 100, a 10's; a DEV Recruit's DEV_LEGACY_TOP, so a Shooting past 10 keeps counting there
+## too (the shot keeps its own bounds: its spread, its soft cap Tempo.SHOT_MAX, the keeper and the blockers).
+## Ordinary players, Hot Stars and all, stay held at 100 as always.
+static func rating_top(p: PoloPlayer) -> float:
+	return float(DEV_LEGACY_TOP) if p != null and p.dev_recruit != "" else 100.0
+
+## An attribute past the normal ten (only ever a DEV Recruit's): shown as "12/10", overcharged.
+static func over_max(v: float) -> bool:
+	return v > MAX + PRECISION
+
 static func keys_for(p: PoloPlayer) -> Array:
 	return KEEPER if p.is_keeper() else FIELD
 
@@ -196,9 +222,12 @@ static func ten_of(legacy: float) -> float:
 static func sync(p: PoloPlayer) -> void:
 	if p.attrs.is_empty():
 		return
+	var top := cap(p)
 	for k in keys_for(p):
-		p.attrs[k] = clampf(snap(float(p.attrs.get(k, 5.0))), 0.0, MAX)
-		p.attr_pot[k] = clampf(snap(maxf(float(p.attr_pot.get(k, p.attrs[k])), p.attrs[k])), p.attrs[k], MAX)
+		p.attrs[k] = clampf(snap(float(p.attrs.get(k, 5.0))), 0.0, top)
+		p.attr_pot[k] = clampf(snap(maxf(float(p.attr_pot.get(k, p.attrs[k])), p.attrs[k])), p.attrs[k], top)
+		if p.walk_on:
+			p.attr_pot[k] = p.attrs[k]   # (a WALK-ON: no potential, ever; WalkOns)
 	var o := overall(p)
 	p.stars = stars_of(o)
 	p.pot_stars = stars_of(potential(p))
@@ -206,7 +235,8 @@ static func sync(p: PoloPlayer) -> void:
 	if p.pro:
 		return   # (a quick-match club's player keeps the ratings he was made with: PoloPlayer.pro)
 	var base := legacy_of(o)
-	var r := func(v: float) -> int: return clampi(roundi(v), 1, 99)
+	var hi := DEV_LEGACY_TOP if p.dev_recruit != "" else 99
+	var r := func(v: float) -> int: return clampi(roundi(v), 1, hi)
 	if p.is_keeper():
 		# (an injured keeper plays at his four less their penalties)
 		base = legacy_of(_mean_eff(p))
@@ -235,7 +265,7 @@ static func set_value(p: PoloPlayer, key: String, v: float) -> void:
 
 ## One ceiling set to `v` (his attribute .. 10).
 static func set_ceiling(p: PoloPlayer, key: String, v: float) -> void:
-	p.attr_pot[key] = clampf(v, value(p, key), MAX)
+	p.attr_pot[key] = clampf(v, value(p, key), cap(p))
 	sync(p)
 
 ## Room left under one ceiling.
@@ -445,9 +475,12 @@ static func effective(p: PoloPlayer, key: String) -> float:
 	return play_value(p, key)
 
 ## A 0-10 attribute (Hot Stars and all) as a share of 10, for the effects that lerp along it:
-## 0 .. 1.1 at HOT_TOP.
+## 0 .. 1.1 at HOT_TOP; a DEV Recruit's past it, up to DEV_UNIT_TOP (nobody else gets there,
+## and every effect that lerps along it keeps its own probability bounds).
+const DEV_UNIT_TOP := (DEV_MAX + 2.0 * HOT_PER_STAR) / MAX
+
 static func unit(v: float) -> float:
-	return clampf(v / MAX, 0.0, HOT_TOP / MAX)
+	return clampf(v / MAX, 0.0, DEV_UNIT_TOP)
 
 ## A shot's pace rating (0-100, what Tempo.shooter_shot reads): his own SHOOTING alone, less any
 ## injury's penalty; never his overall, his other three or his team's. A shooter of PACE_MID
@@ -468,11 +501,14 @@ static func pass_mod(passer: PoloPlayer) -> float:
 		return 0.0
 	return Tempo.curve(PASS_TABLE, play_value(passer, "pas"))
 
-## Share of the normal release time a shooter takes (0.8 .. 1.2).
+## Share of the normal release time a shooter takes (0.8 .. 1.2; 0.76 a VERY HOT 10). A DEV
+## Recruit's Shooting past 10 keeps quickening it, never under RELEASE_FLOOR (nobody else gets near).
+const RELEASE_FLOOR := 0.6
+
 static func release_mult(shooter: PoloPlayer) -> float:
 	if shooter == null or shooter.is_keeper():
 		return 1.0
-	return 1.0 - (play_value(shooter, "sho") - 5.0) * RELEASE_PER_POINT
+	return maxf(RELEASE_FLOOR, 1.0 - (play_value(shooter, "sho") - 5.0) * RELEASE_PER_POINT)
 
 ## How much later the keeper and the blockers react to this release (s; negative: sooner).
 static func release_read(shooter: PoloPlayer) -> float:
@@ -492,8 +528,9 @@ static func eff_defense(d: PoloPlayer, comm: float) -> float:
 		return 5.0
 	if d.is_keeper():
 		return clampf(5.0 + comm, 0.0, MAX)
-	# (his own Defense and his keeper's organising up to 10 as before; his Hot Stars on top, past it)
-	return clampf(base_play_value(d, "dfn") + comm, 0.0, MAX) + hot_bonus(d)
+	# (his own Defense and his keeper's organising up to 10 as before (a DEV Recruit's own cap);
+	# his Hot Stars on top, past it)
+	return clampf(base_play_value(d, "dfn") + comm, 0.0, cap(d)) + hot_bonus(d)
 
 ## The same on the 0-100 scale the pool's older defensive numbers use: his live defence (form
 ## and all) plus what the keeper's organising adds to it (how much a Defense point is worth there).

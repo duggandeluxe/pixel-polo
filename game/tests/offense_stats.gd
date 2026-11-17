@@ -11,7 +11,7 @@ var _pw := ""
 var durs: Array[float] = []          # settled (half-court) possessions: live seconds to the end
 var first_shot: Array[float] = []    # settled possessions with a shot: live seconds to the first one
 
-func run(_runner, matches: int, quiet := false, level := Difficulty.MEDIUM) -> Dictionary:
+func run(_runner, matches: int, quiet := false, level := Difficulty.BASELINE) -> Dictionary:
 	for i in matches:
 		var teams := [League.make_team(i % 8, 0), League.make_team((i + 3) % 8, 0)]
 		_match(MatchFlow.new(teams[0], teams[1], 9000 + i, MatchState.QUARTER_MIN, level))
@@ -182,7 +182,7 @@ func _theirs(f: MatchFlow) -> void:
 							_add("early_" + String(brain0.why))
 					var sh := p.ball.shooter
 					if sh != null and not Geo.in_shot_range(sh.pos):
-						_add("sh_out6")   # (never: OffenseAI only shoots inside 6 m)
+						_add("sh_buzzer" if f.state.clock <= OffenseAI.FINAL else "sh_out6")   # (never, bar the period's last seconds: OffenseAI._final)
 					if sh != null:
 						match sh.tag:
 							"C": _add("sh_C")

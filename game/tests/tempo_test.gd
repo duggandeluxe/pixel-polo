@@ -57,7 +57,11 @@ func _shooter_first() -> void:
 		var res := ShotModel.resolve(Vector2(23, 10), 11.0, 1.0, 120.0, 9.0, [], 10.0, 60.0, rng, false,
 			{"speed": 1.12}, {})
 		top = maxf(top, float(res.speed))
-	r.check(top <= Tempo.SHOT_MAX + 1e-4, "no shot leaves the hand faster than SHOT_MAX (%.1f m/s)" % top)
+	var raw := lerpf(9.0, 17.0, 1.0) * Tempo.shooter_shot(120.0) * 1.12
+	r.check(raw > Tempo.SHOT_MAX and absf(top - Tempo.soft_shot(raw)) < 1e-3 and top < Tempo.SHOT_MAX + 1.5,
+		"past SHOT_MAX only SHOT_SOFT of the excess counts (%.1f m/s raw -> %.2f)" % [raw, top])
+	r.check(Tempo.soft_shot(18.0) == 18.0 and is_equal_approx(Tempo.soft_shot(22.0), Tempo.SHOT_MAX + 2.0 * Tempo.SHOT_SOFT),
+		"soft cap: untouched below SHOT_MAX, SHOT_SOFT of the rest above it")
 
 # 6, 7: one speed, whatever happens to it: flight = distance / speed for every outcome
 func _one_speed_every_outcome() -> void:
@@ -126,7 +130,7 @@ func _drawn_at_its_speed() -> void:
 func _wide_on_screen() -> void:
 	var speeds := {}
 	for aim in [["in", Geo.GOAL_Y + 1.0], ["wide", Geo.GOAL_Y + Geo.GOAL_HALF + 0.9], ["post", Geo.GOAL_Y - Geo.GOAL_HALF - 0.02]]:
-		var flow := MatchFlow.new(TempoBench.lab_team(75, 2), TempoBench.lab_team(85, 1), 77, 99.0, Difficulty.MEDIUM)
+		var flow := MatchFlow.new(TempoBench.lab_team(75, 2), TempoBench.lab_team(85, 1), 77, 99.0, Difficulty.BASELINE)
 		flow.auto_keeper = 0.0   # (no dive: we're watching the ball)
 		flow._start_defense(Play.Kind.HALF_COURT)
 		var p := flow.play

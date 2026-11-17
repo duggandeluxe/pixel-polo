@@ -77,8 +77,28 @@ func run(runner) -> void:
 	# news
 	Game.goto("news")
 	await _frames(3)
+	var NewsScr: GDScript = load("res://src/ui/screens/news.gd")
+	r.check(Game.current_screen.find_child("AroundCollege", true, false) != null and Game.current_screen.find_child("AroundConference", true, false) != null,
+		"11: COLLEGE WATER POLO: AROUND COLLEGE WATER POLO and AROUND THE CONFERENCE")
+	var wk: int = NewsScr.board_week(c)
+	var board_nat: Array = NewsScr.national(c)
+	var conf: Array = NewsScr.conference(c)
+	r.check(wk >= 0 and board_nat.size() == c.schedule[wk].games.filter(func(g): return g.r != null).size() and board_nat.all(func(g): return g.r != null),
+		"11: the national board is that week's played games, every one (%d)" % board_nat.size())
+	var uniq := {}
+	for g in board_nat:
+		uniq[str(g.h) + str(g.a) + str(g.get("d", 0))] = true
+	r.check(uniq.size() == board_nat.size(), "11: no game twice")
+	r.check(not conf.is_empty() and conf.all(func(g): return (c.teams[g.h] as PoloTeam).conf == c.team().conf or (c.teams[g.a] as PoloTeam).conf == c.team().conf),
+		"11: the conference board: only games your conference's teams played (%d)" % conf.size())
+	var line := func(g): return "%s %d-%d %s" % [g.h, int(g.r.s[0]), int(g.r.s[1]), g.a]
+	r.check(NewsScr.national(again).map(line) == board_nat.map(line), "21: saved and loaded, the same scores")
+	NewsScr.tab = "YOUR PROGRAM"
+	Game.goto("news")
+	await _frames(3)
 	var stories: Node = Game.current_screen.find_child("Stories", true, false)
-	r.check(stories != null and stories.get_child_count() == c.league_news.size(), "11: LEAGUE NEWS lists the stories")
+	r.check(stories != null and stories.get_child_count() == maxi(1, NewsScr.program_news(c).size()), "11: YOUR PROGRAM still lists your program's news")
+	NewsScr.tab = "LEAGUE"
 	# facilities
 	Game.goto("facilities")
 	await _frames(3)

@@ -1,6 +1,6 @@
 extends RefCounted
 ## THE EXCLUSIONS & ROLL-OUT UPDATE: personal fouls (exclusions and penalty fouls committed) per
-## player per game, "# EX" on the in-game player card, FOUL TROUBLE at two, ROLLED at three with an
+## player per game (no longer on the in-game holder tag), FOUL TROUBLE at two, ROLLED at three with an
 ## automatic replacement from the bench (every program has one now), no rolled player back, and a
 ## fresh count each game. The numbered checks follow the spec's REQUIRED TESTING list.
 ##   godot --headless --path game -- --test rollout
@@ -117,6 +117,7 @@ func _reentry() -> void:
 	r.check(who.rolled and d.out, "T17: rolled on an exclusion: he's out, the man-up runs")
 	var sub: PoloPlayer = _events(f, "rolled")[0].sub
 	pl.man_up = 0.05
+	pl.man_up_live = true   # (its first pass made: the clock runs)
 	var guard := 0
 	while pl.excluded != null and guard < 120 and not pl.over:   # (the whistle's freeze first, then the man-up)
 		guard += 1
@@ -195,16 +196,14 @@ func _multiple() -> void:
 # ------------------------------------------------------------------ T46
 func _display() -> void:
 	var c := _career(57)
+	# (the HUD cleanup: the in-game holder tag no longer shows the count; it's still kept, MatchState.pf)
 	var p: PoloPlayer = c.team().starters()[2]
-	for n in 4:
-		var tg := Hud.tag_parts(p, n)
-		r.check(String(tg.ex) == "%d EX" % n, "T46: reads \"%d EX\" (the number first)" % n)
-	var tg2 := Hud.tag_parts(p, 2)
 	var plain := Hud.tag_parts(p)
-	r.check(is_equal_approx(float(tg2.ex_x), float(tg2.stars_x) + Deck.star_bar_w_for(p.stars, p.stars, int(tg2.red)) + 6.0) and float(tg2.trait_x) >= float(tg2.ex_x) and is_equal_approx(float(tg2.stars_x), float(plain.stars_x)),
-		"T46: right after the stars, which stay where they were; the trait after it")
-	r.check(Hud.ex_color(0) == Hud.ex_color(1) and Hud.ex_color(2) == Hud.EX_WARN and Hud.ex_color(3) == Hud.EX_OUT, "T46: 2 EX yellow, 3 EX red")
-	r.check(String(plain.ex) == "", "T8: outside a game, no EX")
+	r.check(not plain.has("ex") and not String(plain.text).contains("EX"), "T46: the holder tag shows no EX count")
+	r.check(is_equal_approx(float(plain.pos_x), float(plain.stars_x) + Deck.star_bar_w_for(p.stars, p.stars, int(plain.red)) + 6.0),
+		"T46: the position follows the stars, no gap where the count was")
+	var src := FileAccess.get_file_as_string("res://src/match/match_screen.gd")
+	r.check(not src.contains("dp.keeper.player)") and src.contains("_tag_holder(dp)"), "the defending tag is the ball holder's, not your keeper's")
 
 # ------------------------------------------------------------------ T52, T53
 func _next_game() -> void:

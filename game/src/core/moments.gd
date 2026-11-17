@@ -7,11 +7,11 @@ const CARD_CHANCE := 0.35      # an event card at the end of a week
 
 ## win, big_win, close_loss, loss, title or out (see LockerData).
 static func context(won: bool, margin: int, shootout: bool, round_kind: String) -> String:
-	if won and round_kind in ["conf_final", "nat_final", "d3_final"]:
+	if won and round_kind in ["conf_final", "nat_final"]:
 		return "title"
 	# only an NCSA loss is certainly the end: a conference-tournament loser can still get an
 	# at-large bid
-	if not won and (round_kind.begins_with("nat_") or round_kind.begins_with("d3_")):
+	if not won and round_kind.begins_with("nat_"):
 		return "out"
 	if won:
 		return "big_win" if margin >= 5 else "win"

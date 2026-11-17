@@ -73,7 +73,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")   # (as every Developer Mode lab: by the history, so Settings' own Back still leads out)
+	Game.back("dev_settings")   # (as every Developer Mode lab: by the history, so Settings' own Back still leads out)
 
 # ------------------------------------------------------------------ the celebrations
 ## A made-up record broken (the shape Records.breaks gives the summary): just past its usual mark.

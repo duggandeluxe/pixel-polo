@@ -13,8 +13,12 @@ const TWO_M := 28.0
 const FIVE_M := 25.0
 const SIX_M := 24.0
 const HALF := 15.0
-## Where an excluded defender waits: the re-entry corner by his own goal line.
-const REENTRY := Vector2(29.6, 19.4)
+## Where an excluded defender waits: the exclusion box by his own goal, behind the goal line in the
+## bottom corner, between the red floats of the goal-line rope (x = GOAL_X) and the rope along the
+## back of the cage (PoolArt.BACK_ROPE, 0.7 m behind it), halfway along the red (PoolArt.REENTRY,
+## the last 2 m before the side rope). Out of the field of play: he swims there (Swimmer.out) and
+## swims back in when he's let back (Swimmer.rejoin).
+const REENTRY := Vector2(30.35, 18.6)
 
 static func goal_center() -> Vector2:
 	return Vector2(GOAL_X, GOAL_Y)

@@ -13,6 +13,7 @@ func run(runner) -> void:
 	_rules()
 	_keepers()
 	_allocation()
+	_no_sweeps()
 
 func _p(pos: int, year := 2) -> PoloPlayer:
 	var p := AttrBench.player({}, pos == PoloPlayer.Pos.GK, {}, pos)
@@ -21,10 +22,10 @@ func _p(pos: int, year := 2) -> PoloPlayer:
 	next_id += 1
 	return p
 
-func _e(p: PoloPlayer, line: Dictionary) -> Dictionary:
+func _e(p: PoloPlayer, line: Dictionary, team := "") -> Dictionary:
 	var ln := line.duplicate()
 	ln["gp"] = ln.get("gp", 1)
-	return {"p": p, "team": "X", "line": ln}
+	return {"p": p, "team": team if team != "" else "T%d" % p.id, "line": ln}
 
 func _who(w: Dictionary, cat: String) -> PoloPlayer:
 	return w[cat].p if w.has(cat) else null
@@ -78,3 +79,21 @@ func _allocation() -> void:
 	var gk := _p(PoloPlayer.Pos.GK)
 	var w := ConfAwards.pick_week([_e(star, {"g": 12, "a": 5}), _e(fr, {"g": 6, "a": 2}), _e(two, {"g": 5, "a": 2}), _e(gk, {"sv": 6, "ga": 8})])
 	r.check(w.size() == 4 and _who(w, "rotw") == fr and _who(w, "opotw") == two, "13: allocation gives all four (OPOTW to the next attacker, the only freshman ROTW)")
+
+func _no_sweeps() -> void:
+	# one school's four best weeks: it keeps two, the rest go to the next best from other schools
+	var a := _p(PoloPlayer.Pos.CENTER)
+	var b := _p(PoloPlayer.Pos.WING)
+	var fr := _p(PoloPlayer.Pos.DRIVER, 1)
+	var gk := _p(PoloPlayer.Pos.GK)
+	var o_fr := _p(PoloPlayer.Pos.WING, 1)
+	var o_gk := _p(PoloPlayer.Pos.GK)
+	var o_att := _p(PoloPlayer.Pos.DRIVER)
+	var lines := [_e(a, {"g": 9, "a": 4}, "H"), _e(b, {"g": 7, "a": 3}, "H"), _e(fr, {"g": 6, "a": 2}, "H"), _e(gk, {"sv": 12, "ga": 5}, "H"),
+		_e(o_fr, {"g": 1}, "O"), _e(o_gk, {"sv": 4, "ga": 9}, "P"), _e(o_att, {"g": 2}, "Q")]
+	var w := ConfAwards.pick_week(lines)
+	var n := {}
+	for cat in w:
+		n[String(w[cat].team)] = int(n.get(String(w[cat].team), 0)) + 1
+	r.check(w.size() == 4 and int(n.get("H", 0)) == ConfAwards.MAX_PER_TEAM, "no sweeps: all four given, one school wins only %d" % ConfAwards.MAX_PER_TEAM)
+	r.check(_who(w, "potw") == a, "no sweeps: POTW still the best week")

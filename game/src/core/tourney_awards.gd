@@ -13,6 +13,7 @@ class_name TourneyAwards
 ## for games played: a man with a bye (one game fewer) isn't buried by a man with an extra game,
 ## and one great game doesn't beat a great tournament. PLAYER first (the best overall), then
 ## OFFENSIVE among the rest, then DEFENSIVE (field players and keepers both) among the rest.
+## No sweeps: one school wins at most ConfAwards.MAX_PER_TEAM of a tournament's three.
 ##
 ## Each award is a record in Career.tourney_awards, for good: {year, season, tid, conf, cat, pid,
 ## team (the school he won it for), name, pos, cls, stars, line (his tournament totals), score}.
@@ -31,8 +32,6 @@ static func tid_of(kind: String, conf: String) -> String:
 static func prefix(tid: String) -> String:
 	if tid == "nat":
 		return "ALL-NCSA"
-	if tid == "d3":
-		return "ALL-DIVISION III"
 	return "ALL-" + Colleges.conf_abbr(tid.trim_prefix("conf:"))
 
 ## The week being decided (ConfAwards.decide_week, once a week): a playoff round's lines go into
@@ -46,13 +45,13 @@ static func add_week(c: Career) -> void:
 	for g in round.games:
 		if g.r == null:
 			continue
-		var tid_of_game := "d3" if g.has("k") else ""
 		for tid_team in [String(g.h), String(g.a)]:
 			if seen.has(tid_team) or not c.teams.has(tid_team):
 				continue
 			seen[tid_team] = true
+			var won: bool = Schedule.winner(g) == tid_team
 			var t: PoloTeam = c.teams[tid_team]
-			var key := "%d:%s" % [c.year, tid_of_game if tid_of_game != "" else tid_of(kind, t.conf)]
+			var key := "%d:%s" % [c.year, tid_of(kind, t.conf)]
 			if not c.tourney_stats.has(key):
 				c.tourney_stats[key] = {}
 			var book: Dictionary = c.tourney_stats[key]
@@ -66,6 +65,8 @@ static func add_week(c: Career) -> void:
 				var tot: Dictionary = book[pid].line
 				for k in Career.WEEK_KEYS:
 					tot[k] = int(tot.get(k, 0)) + int(ln.get(k, 0))
+				if won:
+					tot["tw"] = int(tot.get("tw", 0)) + 1   # (team success: PLAYER OF THE TOURNAMENT's, ConfAwards.TEAM_WIN)
 
 ## After the week: any tournament whose final was this week names its three (once).
 static func decide(c: Career) -> Array:
@@ -78,8 +79,6 @@ static func decide(c: Career) -> Array:
 			made.append_array(_decide(c, "conf:" + conf))
 	elif kind == "nat_final":
 		made.append_array(_decide(c, "nat"))
-	elif kind == Schedule.D3_FINAL_ROUND:
-		made.append_array(_decide(c, "d3"))
 	return made
 
 static func _decide(c: Career, tid: String) -> Array:
@@ -95,11 +94,13 @@ static func _decide(c: Career, tid: String) -> Array:
 			entries.append({"p": p, "team": String(book[pid].team), "line": book[pid].line})
 	var made: Array = []
 	var given := {}
+	var per_team := {}
 	for cat in CATS:
-		var best := ConfAwards._best(entries.filter(func(e): return not given.has((e.p as PoloPlayer).id)), cat)
+		var best := ConfAwards._best(entries.filter(func(e): return not given.has((e.p as PoloPlayer).id) and int(per_team.get(String(e.team), 0)) < ConfAwards.MAX_PER_TEAM), cat)
 		if best.is_empty():
 			continue
 		given[(best.p as PoloPlayer).id] = true
+		per_team[String(best.team)] = int(per_team.get(String(best.team), 0)) + 1
 		var rec := _record(c, best, cat, tid)
 		c.tourney_awards.append(rec)
 		made.append(rec)
@@ -117,7 +118,7 @@ static func _record(c: Career, e: Dictionary, cat: String, tid: String) -> Dicti
 	var p: PoloPlayer = e.p
 	var keep := {}
 	for k in e.line:
-		if int(e.line[k]) != 0:
+		if int(e.line[k]) != 0 and k != "tw":   # (the record keeps his own stats; team wins only weighed the choice)
 			keep[k] = int(e.line[k])
 	c.award_players[str(p.id)] = JSON.stringify(p.to_dict())   # (his profile as he was, as the weekly awards keep it)
 	if String(e.team) == c.school:

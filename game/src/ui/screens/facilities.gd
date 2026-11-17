@@ -135,7 +135,7 @@ func _details(it: Dictionary) -> Control:
 		cost.add_child(CreditCoin.widget(int(it.cost)))
 		mid.add_child(cost)
 		if not afford:
-			mid.add_child(UI.label("NOT ENOUGH CREDITS", 8, UI.BAD, "caps"))
+			mid.add_child(UI.label("NOT ENOUGH PP", 8, UI.BAD, "caps"))
 	row.add_child(UI.spacer(6, 0))
 	row.add_child(_upgrade_button(it, maxed, afford))
 	return p

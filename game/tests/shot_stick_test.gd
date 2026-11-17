@@ -177,6 +177,12 @@ func _equivalence() -> void:
 	r.check(is_equal_approx(aim.power(spots[0]), 1.0), "full pull is the slingshot's full power, no more")
 	aim = stick_aim(spots[0], knob(0.0, 0.0))
 	r.check(absf(aim.power(spots[0]) - AimGuide.SHOT_BASE) < 0.001, "just out of the dead zone, the slingshot's softest shot")
+	# the guide dots' colour follows the pull: white soft, yellow half, red-orange full
+	var cols := []
+	for u in [0.0, 0.2, 0.5, 0.6, 0.8, 1.0]:
+		cols.append(AimGuide.power_color(stick_aim(spots[0], knob(u, 0.0)).power_t(spots[0])))
+	r.check(cols == [AimGuide.DOT_SOFT, AimGuide.DOT_SOFT, AimGuide.DOT_MID, AimGuide.DOT_MID, AimGuide.DOT_FULL, AimGuide.DOT_FULL],
+		"the dots go white, then yellow at half pull, then red-orange near full: %s" % [cols])
 
 # ------------------------------------------------------------------ the same shot
 ## Twin plays, the same dice: a slingshot pull and its stick twin shoot the same shot.

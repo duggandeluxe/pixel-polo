@@ -121,20 +121,41 @@ func draw(ci: CanvasItem, v: PoolView, play: Play, t: float) -> void:
 			var goal_pt := v.to_screen(info.point, 0.45)
 			var from := v.to_screen(h.pos, 0.9)
 			var stop := play.sure_block(float(info.cross_y), power(h)) if info.mode == "shot" else {}
+			# the dots say how hard: white soft, yellow mid, red-orange full (the reticle stays gold)
+			var dot_col := power_color(power_t(h)) if info.mode == "shot" else col
 			if not stop.is_empty():
 				# into a certain block (any field defender: Play.sure_block): the line stops there, a
 				# red X where it's blocked (every time). A block that only might happen: no X
 				var at := v.to_screen(stop.at, 0.9)
-				_dots_along(ci, [from, at] as Array[Vector2], col, t, END_GAP * 0.5)
+				_dots_along(ci, [from, at] as Array[Vector2], dot_col, t, END_GAP * 0.5)
 				blocked_x(ci, at.round())
 			else:
-				_dots_along(ci, [from, goal_pt] as Array[Vector2], col, t)
+				_dots_along(ci, [from, goal_pt] as Array[Vector2], dot_col, t)
 				_reticle(ci, goal_pt, col)
 			if info.mode == "no_shot":
 				UI.text_shadow(ci, from + Vector2(-34, -20), "FREE THROW: PASS FIRST", 8, UI.WARN, "body")
 			else:
 				# under the swimmer's waterline, clear of the body
 				_power_bar(ci, v.to_screen(h.pos) + Vector2(-POWER_W / 2.0, 9), power(h), t)
+
+## The pull-back strength, 0 (a shot that just reaches the goal) .. 1 (full power): power()'s
+## shot range, SHOT_BASE..1, as a share. For the dots' colour only; power() is what's thrown.
+func power_t(holder: Swimmer = null) -> float:
+	return clampf((power(holder) - SHOT_BASE) / (1.0 - SHOT_BASE), 0.0, 1.0)
+
+## The guide dots' colour for pull-back strength `k` (power_t), in three flat steps so it reads at
+## a glance and never shimmers between shades: white (soft), yellow (mid), red-orange (full).
+const DOT_SOFT := Color("f4f4ee")
+const DOT_MID := Color("ffd84a")
+const DOT_FULL := Color("ff4f1a")
+const DOT_STEPS := [1.0 / 3.0, 2.0 / 3.0]
+
+static func power_color(k: float) -> Color:
+	if k < DOT_STEPS[0]:
+		return DOT_SOFT
+	if k < DOT_STEPS[1]:
+		return DOT_MID
+	return DOT_FULL
 
 ## Guide dots at an even screen spacing along a polyline, crawling towards its end.
 func _dots_along(ci: CanvasItem, pts: Array[Vector2], col: Color, t: float, end_gap := END_GAP) -> void:

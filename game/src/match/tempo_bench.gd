@@ -56,7 +56,7 @@ static func shot(team_rating: float, shooter: float, cross_y: float, from := SHO
 ## think (Tempo.think_mult, his first man's)}. Times are game seconds (Play.elapsed).
 static func possessions(rating: float, n: int = 8, seed_value: int = 5) -> Dictionary:
 	var att := lab_team(rating, 1, seed_value)
-	var flow := MatchFlow.new(lab_team(AVERAGE, 2, seed_value), att, seed_value, 99.0, Difficulty.MEDIUM)
+	var flow := MatchFlow.new(lab_team(AVERAGE, 2, seed_value), att, seed_value, 99.0, Difficulty.BASELINE)
 	flow.auto_keeper = 0.5
 	var passes := 0
 	var gaps := 0.0

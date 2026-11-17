@@ -39,11 +39,13 @@ var done_t := -1.0            # seconds since the part was completed (-1: not ye
 var segue_t := -1.0           # seconds the callout between parts has been up (-1: none)
 var card_on := false
 var in_career := false        # opened by NEW CAREER (Game.career is the new career)
+var return_to := ""           # opened from SETTINGS: its way out (BACK, MAIN MENU) goes back there
 var popup := {}               # the pop-up up, the play held behind it: {title, lines, buttons: [[label, Callable, primary]]}
 var popup_under := {}         # what the SKIP question covers: it comes back on CANCEL
 
 func setup(params: Dictionary) -> void:
 	in_career = bool(params.get("career", false)) and Game.career != null
+	return_to = "" if in_career else String(params.get("from", ""))
 	var done: Array = Game.settings.get("tutorials_done", [])
 	var from := String(params.get("id", ""))
 	part = Drill.ORDER.find(from) if from in Drill.ORDER else Drill.resume_part(done)
@@ -224,6 +226,9 @@ func _start_over() -> void:
 
 func _to_menu() -> void:
 	Sfx.crowd(0.0)
+	if return_to != "":
+		Game.back(return_to)
+		return
 	Game.history.clear()
 	Game.goto("title", {}, false)
 
@@ -267,8 +272,12 @@ func _pause() -> void:
 		menu.append(["START OVER", func():
 			paused = false
 			_start_over()])
-		menu.append(["MAIN MENU", _to_menu])
+		menu.append([_menu_word(), _to_menu])
 	Game.dialog("PAUSED", "TUTORIAL: " + drill.title(), menu)
+
+## The way out's name: MAIN MENU, or SETTINGS when it was opened from there.
+func _menu_word() -> String:
+	return return_to.to_upper() if return_to != "" else "MAIN MENU"
 
 # ------------------------------------------------------------------ drawing
 ## The strip's two: BACK (SKIP TUTORIAL on a new career's run) and RESTART.
@@ -292,7 +301,7 @@ func buttons_now(size: Vector2) -> Array:
 		var gap := 6.0
 		var bw := floorf((CARD_W - 16 - gap) / 2.0)
 		var bx := r.position.x + 8
-		for a in [["MAIN MENU", _to_menu, true], ["NEW CAREER", _new_career, false]]:
+		for a in [[_menu_word(), _to_menu, true], ["NEW CAREER", _new_career, false]]:
 			out.append([Rect2(bx, r.end.y - BTN_H - 8, bw, BTN_H), a[0], a[1], a[2]])
 			bx += bw + gap
 	return out
@@ -362,8 +371,9 @@ func _draw_segue(ci: Control, size: Vector2) -> void:
 func _draw_popup(ci: Control, size: Vector2) -> void:
 	ci.draw_rect(Rect2(0, BAR_H, size.x, size.y - BAR_H), Color(0.02, 0.04, 0.1, 0.6))
 	var r := _popup_rect(size)
-	ci.draw_rect(r, NAVY)
-	ci.draw_rect(r, UI.GOLD, false, 1.0)
+	# the game's popup (Deck.popup): a gold-edged tutorial card with its title on a plate
+	Deck.popup(ci, r, "reward", NAVY)
+	Deck.popup_plate(ci, Rect2(r.position.x + 6, r.position.y + 10, r.size.x - 12, 24), "reward")
 	UI.text(ci, r.position + Vector2(0, 28), String(popup.title), 16, UI.GOLD, "big", HORIZONTAL_ALIGNMENT_CENTER, POP_W)
 	var lines: Array = popup.lines
 	for i in lines.size():
@@ -373,15 +383,13 @@ func _draw_popup(ci: Control, size: Vector2) -> void:
 func _draw_card(ci: Control, size: Vector2) -> void:
 	ci.draw_rect(Rect2(0, BAR_H, size.x, size.y - BAR_H), Color(0.02, 0.04, 0.1, 0.6))
 	var r := _card_rect(size)
-	ci.draw_rect(r, NAVY)
-	ci.draw_rect(r, UI.GOLD, false, 1.0)
+	Deck.popup(ci, r, "reward", NAVY)
 	UI.text(ci, r.position + Vector2(0, 24), "TUTORIAL COMPLETE", 16, UI.GOLD, "big", HORIZONTAL_ALIGNMENT_CENTER, CARD_W)
 	UI.text(ci, r.position + Vector2(0, 42), "YOU'RE READY TO PLAY!", 8, UI.TEXT, "caps", HORIZONTAL_ALIGNMENT_CENTER, CARD_W)
 
-## A flat button in the match HUD's style (ResultsPanel's): yellow for the way on, navy otherwise.
+## A button in the match HUD's style (ResultsPanel's): yellow for the way on, navy otherwise; the
+## game's raised face (cut corners, the bevel).
 func _button(ci: Control, r: Rect2, label: String, primary: bool) -> void:
-	ci.draw_rect(r, YELLOW if primary else NAVY)
-	if not primary:
-		ci.draw_rect(r, UI.BORDER, false, 1.0)
+	Deck.frame(ci, r, YELLOW if primary else NAVY, UI.INK if primary else UI.BORDER, false, UI.BEVEL_RAISED)
 	var big := r.size.y >= POP_BTN.y   # (a pop-up's button: the label in big type)
 	UI.text(ci, Vector2(r.position.x, r.position.y + roundf(r.size.y / 2.0) + (6 if big else 4)), label, 16 if big else 8, NAVY if primary else UI.TEXT, "caps", HORIZONTAL_ALIGNMENT_CENTER, r.size.x)

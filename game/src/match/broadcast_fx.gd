@@ -41,15 +41,15 @@ func step(dt: float) -> void:
 		if float(msg.t) > HOLD:
 			msg = {}
 
-## `live`: the ball's in play (nothing but the tag draws). `top`: keep clear of the top (the goal
-## show's words are at the bottom this time).
-func draw(ci: CanvasItem, size: Vector2, live: bool, words_low: bool, st: MatchState) -> void:
+## `live`: the ball's in play (nothing but the tag draws). The lower third sits at the bottom,
+## clear of the goal show's words (always under the scoreboard: GoalShow.place).
+func draw(ci: CanvasItem, size: Vector2, live: bool, st: MatchState) -> void:
 	if msg.is_empty() or live:
 		return
 	var u := 1.0 if calm else clampf(float(msg.t) / 0.18, 0.0, 1.0)
 	var out := 0.0 if calm else clampf((float(msg.t) - HOLD + 0.2) / 0.2, 0.0, 1.0)
 	var h := 34.0 if level >= 3 else 20.0
-	var y := 30.0 if words_low else size.y - h - 18.0
+	var y := size.y - h - 18.0
 	var w := minf(size.x - 16.0, 300.0 if level >= 3 else 210.0)
 	var x := roundf(lerpf(-w, 8.0, u * (1.0 - out)))
 	var tm: PoloTeam = msg.team

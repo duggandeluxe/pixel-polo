@@ -30,6 +30,7 @@ static func update(p: Play, dt: float) -> void:
 		_keeper(p)
 		return
 	if p.breakout:
+		CounterCurl.update(p, dt)   # (the ball's changed hands: the counter's rotation is off)
 		_breakout(p, dt)
 		_keeper(p)
 		return
@@ -44,22 +45,26 @@ static func _attack(p: Play, dt: float) -> void:
 	var loose_chaser := _loose_chaser(p) if p.ball.state == Ball.State.LOOSE else null
 	if p.carry:
 		ensure_lanes(p)
+	CounterCurl.update(p, dt)   # (a counter that's already on: its rotation; it never starts one)
 	for a in p.attackers:
 		a.boost = 1.0
-		if p.counter_t > 0.0 or p.carry:
-			a.boost = PlaySetup.BREAK_SWIM
+		if p.counter_t > 0.0 and not p.carry:
+			a.boost = PlaySetup.BREAK_SWIM   # (the counter itself is Play.COUNTER_SURGE, on every boost: Swimmer.surge)
 		if a == p.holder:
 			_carry(p, a, dt)
 			continue
 		if p.ball.state == Ball.State.PASS and a == p.ball.receiver:
+			CounterCurl.drop(p, a)   # (the ball comes first: out of the rotation till he's free)
 			a.target = run_onto(a, p.ball.to, true, (1.0 - p.ball.t) * p.ball.dur) if p.carry else p.ball.to
 			a.boost = 1.2
 			continue
 		if a == loose_chaser:
+			CounterCurl.drop(p, a)
 			a.target = run_onto(a, p.ball.pos, false) if p.carry else p.ball.pos
 			a.boost = 1.25
 			continue
 		if a.drive_t > 0.0:
+			CounterCurl.drop(p, a)
 			a.drive_t -= dt
 			a.called = maxf(0.0, a.called - dt)
 			a.target = a.drive_goal
@@ -67,13 +72,21 @@ static func _attack(p: Play, dt: float) -> void:
 			if a.pos.distance_to(a.drive_goal) < 0.4:
 				a.drive_t = minf(a.drive_t, 0.7)
 			continue
-		if p.carry:
-			a.target = _break_spot(p, a)
-			continue
 		var wob := Vector2(sin(a.anim * 0.35 + a.home.y), cos(a.anim * 0.27 + a.home.x)) * 0.3
-		var slide := DefenseFormation.slide_spot(p, a)
+		var slide := DefenseFormation.slide_spot(p, a) if not p.carry else Vector2.INF
 		if slide != Vector2.INF:
+			CounterCurl.drop(p, a)
 			a.target = slide + wob * 0.3   # 5 DROP: his man's gone, so in he slides
+			continue
+		var curl := CounterCurl.target(p, a)
+		if curl != Vector2.INF:
+			a.target = curl   # the counter's rotation: in for a spot, holding it, or moved on to the next
+			continue
+		if p.carry:
+			if a.tag != "C" and CounterCurl.settled(p, a) and not p.lanes.has(a):
+				a.target = a.home   # on his own spot already: he holds it while the break plays out
+			else:
+				a.target = _break_spot(p, a)
 			continue
 		if a.tag == "C" and p.man_up <= 0.0:
 			a.target = _center_seal(p, a) + wob * 0.3
@@ -129,7 +142,7 @@ static func run_onto(a: Swimmer, at: Vector2, in_air: bool, secs := INF) -> Vect
 	if in_air and secs < INF:
 		var v := (at + Vector2(CATCH_AHEAD, 0.0) - a.pos) / maxf(secs, 0.05)
 		v.x = maxf(v.x, 0.0)   # never back for it
-		if v.length() < a.top_speed * RUN_TOP:
+		if v.length() < a.top_speed * a.surge * RUN_TOP:
 			return a.pos + v / STEP_GAIN
 	if to.x <= 0.0 or to.length() < 0.05:
 		return Vector2(a.pos.x + RUN_THROUGH, at.y)
@@ -266,7 +279,7 @@ static func _carry(p: Play, a: Swimmer, dt: float) -> void:
 				# down his lane first, then in at the goal (the further up the pool, the more lane)
 				var k := clampf((LANE_CARRY_UNTIL - a.pos.x) / 6.0, 0.0, 1.0)
 				a.target.y = lerpf(a.target.y, break_lane(p, a, a.pos), k)
-			a.boost = PlaySetup.CARRY_SWIM
+			a.boost = 1.0   # (his counter speed is Play.COUNTER_SURGE: Swimmer.surge)
 			return
 	if p.defending and a.drive_t > 0.0:
 		# their man driving the ball in (OffenseAI), or carrying on the drive he caught it on
@@ -516,6 +529,7 @@ static func _defend(p: Play, dt: float) -> void:
 		elif m != null:
 			var gap := 0.9 if m == p.holder else 1.1
 			var wing := m == p.holder and DefenseFormation.wing_pressure(p, m)
+			var deny := DefenseFormation.wing_deny(p, d, m)   # (M-DROP, 3-4 DROP: his wing off the ball)
 			if m == p.holder and not p.raised and m.speed() > 0.5:
 				gap = 1.6   # a man swimming the ball up gets a little room
 			if wing:
@@ -529,6 +543,10 @@ static func _defend(p: Play, dt: float) -> void:
 				want = _center_guard_spot(p, d, m, dt)
 				if p.cfight == Fight.SPIN or p.cfight == Fight.ROUND:
 					d.boost = 1.2   # going round him: a hard few strokes
+			elif deny:
+				# the drop goes on inside without him: he stays on his wing, a hand in the lane to the
+				# ball, goal side of it, never sagging off into the hole
+				want = DefenseFormation.deny_spot(p, m, lane)
 			elif m != p.holder and press and m.tag != "C":
 				# PRESS is man to man all over the pool: the far side stays on its men too, a hand
 				# in the lane (PRESS_LANE at most), never sagging off into the hole (a drop's job)
@@ -539,13 +557,13 @@ static func _defend(p: Play, dt: float) -> void:
 				if m.tag != "C" and m.pos.distance_to(p.ball.pos) > 8.0:
 					want = want.lerp(Vector2(26.8, Geo.GOAL_Y), help)
 			if m.tag != "C":
-				want += d.ai_err * (DefenseFormation.WING_ERR if wing else (0.5 if m == p.holder else 1.0))   # (a positioning mistake)
+				want += d.ai_err * (DefenseFormation.WING_ERR if wing or deny else (0.5 if m == p.holder else 1.0))   # (a positioning mistake)
 		if m != null and d.back_off > 0.0:
 			d.back_off -= dt
 			want = m.pos + (want - m.pos).normalized() * 1.9
 		if p.man_up > 0.0:
 			want.x = maxf(want.x, 25.6)
-		var react := (3.0 + Attributes.eff_defense_legacy(d.player, comm) / 30.0) * read
+		var react := (3.0 + Attributes.eff_defense_legacy(d.player, comm) / 30.0 * pos_def(d)) * read
 		if m != null and m.called > 0.0:
 			react *= 0.5   # a called drive catches his man a step slow
 		d.target = d.target.lerp(want, clampf(dt * react, 0.0, 1.0))
@@ -636,8 +654,10 @@ static func _center_guard_spot(p: Play, d: Swimmer, c: Swimmer, dt: float) -> Ve
 ## less (his effective Defense, his keeper's organising `comm` in it), and his Strength gets him
 ## round sooner too (Attributes.SWITCH_PER_POINT a point either side of 5). How soon he reads that
 ## he has to (`level`, Difficulty "switch") is his AI's.
-static func center_switch_wait(d: Swimmer, comm: float = 0.0, level: float = Difficulty.MEDIUM) -> float:
-	var w := lerpf(CENTER_SWITCH_WAIT.x, CENTER_SWITCH_WAIT.y, clampf(Attributes.eff_defense_legacy(d.player, comm) / 100.0, 0.0, 1.0))
+## At 2MD (pos_def) his Defense counts TWO_MD_POSITIONING more, a DEV Recruit's past 10 too.
+static func center_switch_wait(d: Swimmer, comm: float = 0.0, level: float = Difficulty.BASELINE) -> float:
+	var top := Attributes.DEV_LEGACY_TOP / 100.0 if d.two_md else 1.0
+	var w := lerpf(CENTER_SWITCH_WAIT.x, CENTER_SWITCH_WAIT.y, clampf(Attributes.eff_defense_legacy(d.player, comm) / 100.0, 0.0, top) * pos_def(d))
 	return w * clampf(1.0 - (Attributes.strength(d.player) - 5.0) * Attributes.SWITCH_PER_POINT, 0.7, 1.3) * Difficulty.value("switch", level)
 
 ## Every ERR_EVERY s: where each defender (and the keeper) misreads his spot by, for a while.
@@ -767,10 +787,11 @@ static func _win_time(p: Play, c: Swimmer, g: Swimmer) -> float:
 	return clampf(p.fight_rng.randf_range(CENTER_WIN.x, CENTER_WIN.y) - win_edge(p, c, g), CENTER_WIN.x, CENTER_WIN.y)
 
 ## The centre's edge in the 2 m battle, in seconds sooner he wins inside water: his Strength over
-## his guard's, less half of the guard's effective Defense over 5, and a WRESTLER either side.
+## his guard's, less half of the guard's effective Defense over 5 (TWO_MD_POSITIONING more at 2MD:
+## pos_def), and a WRESTLER either side.
 static func win_edge(p: Play, c: Swimmer, g: Swimmer) -> float:
 	var pts := Attributes.strength(c.player) - Attributes.strength(g.player) \
-		- 0.5 * (Attributes.eff_defense(g.player, p.comm()) - 5.0)
+		- 0.5 * pos_def(g) * (Attributes.eff_defense(g.player, p.comm()) - 5.0)
 	var edge := pts * Attributes.CENTER_WIN_PER_POINT
 	if Traits.has(c.player, "wrestler"):
 		edge += 0.6
@@ -781,8 +802,13 @@ static func win_edge(p: Play, c: Swimmer, g: Swimmer) -> float:
 ## How long the centre holds his man behind him once he's sealed him, as a share of CENTER_OPEN:
 ## a guard stronger (and better) than the centre fights back round sooner.
 static func seal_mult(p: Play, c: Swimmer, g: Swimmer) -> float:
-	var guard := 0.5 * (Attributes.strength(g.player) + Attributes.eff_defense(g.player, p.comm()))
+	var guard := 0.5 * (Attributes.strength(g.player) + Attributes.eff_defense(g.player, p.comm()) * pos_def(g))
 	return clampf(1.0 - (guard - Attributes.strength(c.player)) * Attributes.SEAL_PER_POINT, 0.7, 1.3)
+
+## How much his Defense counts in his positioning: Attributes.TWO_MD_POSITIONING in the 2MD place
+## (Swimmer.two_md), otherwise 1. Only positioning reads it, never steals, blocks or fouls.
+static func pos_def(d: Swimmer) -> float:
+	return Attributes.TWO_MD_POSITIONING if d != null and d.two_md else 1.0
 
 ## Out from the centre `c` towards the ball at `b`; straight down from the point (no side to
 ## the ball), turned CENTER_NUDGE round to `side`, the side his guard holds (still in the lane).

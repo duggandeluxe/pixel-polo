@@ -29,8 +29,6 @@ const FILL := Color("0a2a78", 0.38)
 const BAND := Color("0b2f8f", 0.72)
 const RIM := Color("6fa8ff", 0.75)
 const RAY := Color("8fb8ff", 0.22)
-const KNOB := Color("8fb4ff")
-const KNOB_DARK := Color("1d3f9e")
 
 var rest := Vector2.ZERO     # the knob's rest point on screen (the wedge's narrow point)
 var knob := Vector2.ZERO     # the knob, px from rest: x <= 0 back, y down
@@ -146,9 +144,48 @@ func draw(ci: CanvasItem, held: bool) -> void:
 		ci.draw_line(rest + Vector2(-KNOB_R - 2, (KNOB_R + 2) * SPREAD * s), end, Color(RAY, RAY.a * a), 1.0)
 	var c := (rest + knob).round()
 	_disc(ci, c + Vector2(0, 1), KNOB_R + 1, Color(PoolArt.INK, PoolArt.INK.a * a))
-	_disc(ci, c, KNOB_R + 1, Color(KNOB_DARK, a))
-	_disc(ci, c, KNOB_R - 1, Color(KNOB.lightened(0.15) if held else KNOB, a))
-	_disc(ci, c + Vector2(-2, -3), 2, Color(1, 1, 1, 0.75 * a))
+	_disc(ci, c, KNOB_R + 1, Color(PoolArt.INK, a))
+	_ball(ci, c, KNOB_R, a, held)
+
+## The knob: the game's ball up close (PoolArt.BALL's yellow, BALL_LINE's blue seams), lit from
+## the top left in three flat tones, two curved seams round a centre panel and one across it.
+const BALL_HI := Color("fff0a0")
+const BALL_SHADE := Color("d9a020")
+const SEAM_DARK := Color("1d3f9e")
+const LIGHT := Vector3(-0.5, -0.6, 0.62)
+const ARC_C := 1.3            # the seams' arcs: centred this far out on the diagonal (ball radii)...
+const ARC_R := 1.55           # ...this big, so they bow round a band through the middle
+const SEAM_W := 0.55          # half a seam's width, px
+
+static func _ball(ci: CanvasItem, c: Vector2, r: int, a: float, held: bool) -> void:
+	var rr := r + 0.5
+	var light := LIGHT.normalized()
+	var c1 := Vector2(-ARC_C, -ARC_C)
+	var c2 := Vector2(ARC_C, ARC_C)
+	for dy in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			if dx * dx + dy * dy > rr * rr:
+				continue
+			var n := Vector2(dx, dy) / rr
+			var lit := Vector3(n.x, n.y, sqrt(maxf(0.0, 1.0 - n.length_squared()))).dot(light)
+			var d1 := n.distance_to(c1) - ARC_R
+			var d2 := n.distance_to(c2) - ARC_R
+			var seam := absf(d1) * rr < SEAM_W or absf(d2) * rr < SEAM_W \
+				or (d1 > 0.0 and d2 > 0.0 and absf(n.x - n.y) * rr * 0.7071 < SEAM_W)
+			var col: Color
+			if seam:
+				col = PoolArt.BALL_LINE if lit > 0.25 else SEAM_DARK
+			elif lit > 0.78:
+				col = BALL_HI
+			elif lit > 0.25:
+				col = PoolArt.BALL
+			else:
+				col = BALL_SHADE
+			if held:
+				col = col.lightened(0.08)
+			ci.draw_rect(Rect2(c.x + dx, c.y + dy, 1, 1), Color(col, a))
+	# the shine: a 2x2 glint up on the lit side
+	ci.draw_rect(Rect2(c.x - 4, c.y - 5, 2, 2), Color(1, 1, 1, 0.9 * a))
 
 ## The wedge's rows between the shape `outer` px out from the fan and the one `inner` px out
 ## (inner < 0: none), as spans that never overlap, so a translucent colour never doubles up.

@@ -98,13 +98,16 @@ simulated. Here that means:
   exclusions and 5 m penalties drawn, the score). One confirmed decision a match sets your drop for
   Q3 and Q4; Coaching's gameplan is never changed by it, and a match isn't saved part-way, so
   every match gets its own.
-- **Defensive formations** (`src/match/defense_formation.gd`). Whenever they attack, two big
-  buttons along the bottom (`FormationBar`: 15% of the pool's height on screen, as wide as the
-  room right of your keeper's tag allows) offer PRESS | your gameplan's drop (`MatchFlow.
-  user_formations`); the other three drops aren't yours this match. Every possession
-  starts on PRESS, not picked (gold outline); tap one and it's yours for the whole possession
-  (gold, the rest dimmed), through fouls, loose balls, rebounds and shot-clock resets, until the
-  ball changes hands. While their shot is coming a tap is a dive, never a call. Their defence
+- **Defensive formations** (`src/match/defense_formation.gd`). Whenever they attack, one big
+  CALL DROP button bottom right (`FormationBar`: 15% of the pool's height on screen, as wide as
+  the room right of your keeper's tag allows, to 124 px) calls your gameplan's drop (`MatchFlow.
+  user_formations`, whichever drop it is; the label never changes). Every possession starts in
+  your normal defence (PRESS) with the button up; tap it and the drop's on for the whole
+  possession (the button stays down: deeper navy, cyan edge, a gold check, one pixel flash),
+  through fouls, loose balls, rebounds and shot-clock resets, until the ball changes hands. It's
+  one way: another tap does nothing. A 6 on 5 takes the button off the screen, called or not, and
+  the exclusion's own defence runs; even again and still their ball, it's back up in the normal
+  defence (`Play._reopen_call`). While their shot is coming a tap is a dive, never a call. Their defence
   picks one at the start of each of its possessions (from your centre against its guard, your
   shooters man by man, its own defenders, the score and the clock, and where your goals have
   come from today, with some variety) and is locked the same way; it's shown under the shot
@@ -349,9 +352,10 @@ On top of that:
   coin (`src/ui/credit_coin.gd`, art in `game/assets/ui/`, made by `tools/make_credit_coin.py`
   from the original image; `{coin}` in text draws it).
 - **Recruiting market** (`src/core/recruiting.gd`; screens `recruiting`, `roster_cuts`). Eight
-  prospects for sale, each with his own price (8-99): 2 + 3(S-1.5) + 6(S-1.5)^2 for his stars,
-  + 0.4 x his four attributes, + 0.65 x his room to his ceilings, + position (GK 3, C 2, DEF 2,
-  UT 1). Up to four signings a season; REFRESH RECRUITS replaces the eight (first free, then
+  prospects for sale, each with his own price (10-110): 5 + 5(S-1.5) + 8(S-1.5)^2 for his stars,
+  + 0.50 x his four attributes, + 0.80 x his room to his ceilings, + position (GK 3, C 2, DEF 2,
+  UT 1), then +2% / +4% for 4.5 / 5-star potential, never past 110 (DEV Recruits: a fixed 200).
+  Prices are set when a prospect is made and saved with him, never recalculated. Up to four signings a season; REFRESH RECRUITS replaces the eight (first free, then
   3, 5, 8, 10 each). The prospects show as the Roster screen's player cards; a card opens his
   profile (the player page) with everything shown, potential and ceilings too (no scouting),
   and SIGN RECRUIT. Signed recruits wait in
@@ -365,7 +369,7 @@ On top of that:
   credits; prospects who had committed to you become incoming recruits.
 - **Pools.** Every school has one fixed home pool and games are played in the home team's
   pool. There's one pool so far (`game/src/core/pools.gd`); add more there.
-- **Store.** Pixel Polo +, Yellow Coin packs, and the Division II and III packs.
+- **Store.** Pixel Polo + (200 PP), Polo Points (PP) packs (60 / 180 / 350 / 800 PP), LUCKY SPIN (watch an ad, win 5 / 10 / 15 PP, 2 spins every 6 hours).
   Bought credits sit in a vault that survives a new career. Real purchases use the StoreKit 2
   plugin on iPhone; the desktop has a labelled test store.
 - **You're the keeper.** When they shoot, tap the top, middle or bottom of your goal, timed so
@@ -373,8 +377,9 @@ On top of that:
   shootout the camera cuts to your goal; dive too early there and a good shooter goes the
   other way. A shootout kick is just the shooter and the keeper. In multiplayer you make the
   saves against your friend's shots.
-- **Difficulty:** DYNAMIC (the default) starts easy and follows how you play; a new career
-  starts at the beginning. Or EASY, NORMAL, HARD. One number tunes the keeper duel, their
+- **Difficulty:** every new dynasty starts at DYNAMIC, which starts at MEDIUM and follows how
+  you play. Or EASY, MEDIUM, HARD, picked on the New Career screen or any time in Settings;
+  each dynasty save keeps its own pick. One number tunes the keeper duel, their
   shot rate, their keeper and how often passes get picked off (`src/core/difficulty.gd`).
 - **Tutorial.** Every new career opens with it, before the first official game: one continuous
   tutorial in four parts (passing, the counterattack, shooting, goalie blocking). Each part opens
@@ -391,9 +396,12 @@ On top of that:
   a word with whoever struggled, pizza night), player morale, team momentum, event cards
   and press conferences. Every choice is a trade-off.
 - **Visual Upgrades.** The Dynasty Hub's VISUAL UPGRADES card (where the Game Guide was; the guide
-  is on the title screen's help button) opens a gallery of six cards (each opens its
-  own page: a live preview of any level, buying, wearing). The Yellow Coin Shop sells Yellow Coins and
-  Pixel Polo +, and the Division II and III packs (COMING SOON until the store confirms them).
+  is on the title screen's help button) opens a gallery of seven cards (each opens its
+  own page: a live preview of any level, buying, wearing). SCOREBOARD is three looks for the
+  match's top-centre board: Classic (free), Enhanced (100) and Premium (200)
+  (`src/match/scoreboard.gd`); Developer Mode's SCOREBOARD VISUAL PREVIEW shows all three live and can override the tier for
+  the session (in a match: the pause menu's BOARD button, or F8). The Polo Points Shop sells Polo
+  Points and Pixel Polo +.
 - **Awards and records.** Every season: NCSA Player of the Year, the Golden Cap, Keeper of
   the Year, Coach of the Year and the All-Conference team. School and NCSA record books for a
   game, a season and a career; breaking one pays credits (`src/core/awards.gd`,
@@ -504,8 +512,8 @@ relay/            the online relay as a Cloudflare Worker (see relay/README.md)
   time, pick your team under Signing & Capabilities, plug in the iPhone and press Run. Every Run
   first repacks the current game (`tools/ios_pack_for_xcode.sh`, a build phase in the project),
   so Xcode always runs the latest code. Run `tools/build_ios.sh` again only when export settings,
-  icons or the iOS plugins change, since it rewrites the Xcode project. Bundle ID `com.akikawasaki.retropolo`,
-  team `7844HC9AYV` (same as Retro Swim). The iOS Simulator can't run it: Godot 4.7.2's iOS
+  icons or the iOS plugins change, since it rewrites the Xcode project. Bundle ID and Team ID are
+  placeholders (`com.CHANGEME.pixelpolo`, empty team) until you set your own (app_store_release/OUTSTANDING_SETUP.md). The iOS Simulator can't run it: Godot 4.7.2's iOS
   template only has an x86_64 simulator library.
   The iOS export includes two plugins in `game/ios/plugins/`: StoreKit 2 (copied from Retro
   Swim) and Bluetooth (`tools/build_ble_ios.sh` rebuilds it).
@@ -515,6 +523,10 @@ relay/            the online relay as a Cloudflare Worker (see relay/README.md)
   (`gradle_build/use_gradle_build=true`).
 
 ## Before a store release
+
+- **App Store:** everything for the iOS release (build steps, IAP products, AdMob, privacy,
+  listing, checklists, what only you can do) is in [app_store_release/](app_store_release/README.md).
+  `godot --headless --path game -- --test app_store` checks the game's side.
 
 - Pick the final name. "Retro ___" is New Star Games' naming family (Retro Bowl, Retro
   Goal), so a distinct name is safer for App Store review. It's one string in

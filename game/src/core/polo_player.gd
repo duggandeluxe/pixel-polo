@@ -50,6 +50,7 @@ var inj_type := ""          # "shoulder", "hip", "head" (keepers: always "head")
 var inj_sev := ""           # "minor", "moderate"
 var stats := {}             # this season: gp, g, a, sv, st
 var totals := {}            # whole college career, same keys
+var seasons: Array = []     # his finished seasons, oldest first: {s: "2026-27", yr: 1-4, team: id, stats: {...}}
 var awards: Array = []      # "2026-27 All-Conference" and friends
 var trait_id := ""          # one thing he's known for (Traits), or ""
 var schol := false          # on one of the program's scholarships (Career.SCHOL_MAX)
@@ -75,6 +76,12 @@ var shape: Array = []       # being made: each attribute's lean off his overall 
                             # made with (Attributes.from_legacy), so rescaling him keeps it. Not saved.
 var dev := ""               # hidden: the development profile he was recruited with (Recruiting.DEV_PROFILES),
                             # "" for anyone made before them. Says nothing the ceilings don't; kept for the record.
+var dev_recruit := ""      # a DEV RECRUIT's identity (DevRecruits.DEFS: "blake", "logan"), "" for
+                            # everyone else: his attributes may pass 10 (Attributes.cap). Saved only when set.
+var walk_on := false        # a WALK-ON (WalkOns: open tryouts filled an empty place): no potential at
+                            # all, every ceiling his attribute (Attributes.sync holds it). Saved only when set.
+var walkon_rookie := false  # ...and still in his first season here: a rookie for the rookie awards
+                            # whatever his class year (WalkOns.is_rookie). Off at the next transition.
 var last_game := {}         # his last graded game: {raw, exp, pm, gr, was (form before it)}, and his
                             # line's numbers (PlayerForm.LINE_FIELD / LINE_KEEPER) since they were kept
 
@@ -234,17 +241,27 @@ func add_stat(key: String, n: int = 1) -> void:
 func stat(key: String) -> int:
 	return int(stats.get(key, 0))
 
+## The season over: this season's numbers kept in his season log (FULL CAREER STATS), once a
+## season, only if he played.
+func archive_season(label: String, team_id: String) -> void:
+	if int(stats.get("gp", 0)) <= 0:
+		return
+	if not seasons.is_empty() and String(seasons[-1].get("s", "")) == label:
+		return
+	seasons.append({"s": label, "yr": year, "team": team_id, "ovr": snappedf(rating10(), 0.01), "stars": stars, "stats": stats.duplicate()})
+
 func to_dict() -> Dictionary:
 	return {"first": first, "last": last, "number": number, "pos": pos, "lefty": lefty, "age": age,
 		"shoot": shoot, "passing": passing, "speed": speed, "strength": strength,
 		"defense": defense, "keeping": keeping, "skin": skin, "id": id, "year": year, "pot": snappedf(pot, 0.0001),
 		"development": Development.to_dict(self), "stats": stats.duplicate(),
-		"totals": totals.duplicate(), "awards": awards.duplicate(), "trait_id": trait_id,
+		"totals": totals.duplicate(), "seasons": seasons.duplicate(true), "awards": awards.duplicate(), "trait_id": trait_id,
 		"schol": schol, "home": home, "region": region, "dev": dev,
 		"stars": stars, "pot_stars": pot_stars, "star_base": snappedf(star_base, 0.0001), "form": form.duplicate(),
 		"heat": heat, "susp": susp, "heat_bonus": snappedf(heat_bonus, 0.0001),
 		"last_game": last_game.duplicate(), "attrs": _snapped(attrs), "attr_pot": _snapped(attr_pot),
-		"stars_locked": snappedf(stars_locked, 0.0001)}
+		"stars_locked": snappedf(stars_locked, 0.0001)}.merged({"dev_recruit": dev_recruit} if dev_recruit != "" else {}) \
+		.merged({"walk_on": true, "walkon_rookie": walkon_rookie} if walk_on else {})
 
 ## Saved fractions keep 4 decimals, so a save round-trips exactly.
 static func _snapped(d: Dictionary) -> Dictionary:
@@ -291,12 +308,25 @@ static func from_dict(d: Dictionary) -> PoloPlayer:
 			for ak in src:
 				out[String(ak)] = float(src[ak])
 			p.set(k, out)
+		elif k == "seasons":
+			p.seasons = []
+			for e in d[k]:
+				var st := {}
+				for sk in (e.get("stats", {}) as Dictionary):
+					st[sk] = int(e.stats[sk])
+				p.seasons.append({"s": String(e.get("s", "")), "yr": int(e.get("yr", 0)), "team": String(e.get("team", "")), "stats": st})
 		elif k in ["stats", "totals"]:
 			var src: Dictionary = d[k]
 			var out := {}
 			for sk in src.keys():
 				out[sk] = int(src[sk])
 			p.set(k, out)
+		elif k == "admin" or k == "dev_recruit":
+			p.dev_recruit = String(d[k])   # (a save from before the DEV Recruits rename calls him "admin")
+		elif k == "dev":
+			p.dev = DevRecruits.DEV_PROFILE if String(d[k]) == "admin" else String(d[k])   # (likewise)
+		elif k == "walk_on" or k == "walkon_rookie":
+			p.set(k, bool(d[k]))
 		elif k in ["development", "injury", "boosts", "prog"]:
 			pass   # (below; the last three only in saves from before XP development)
 		else:

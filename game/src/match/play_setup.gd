@@ -16,6 +16,9 @@ const HOME_4_2 := {
 	"3": Vector2(25.0, 7.5), "4": Vector2(28.1, 8.6), "5": Vector2(28.0, 5.6),
 }
 const TAGS := ["C", "1", "2", "3", "4", "5"]
+## The 2MD's place in a team's seven (PoloTeam.SLOTS: Slot.TWO_MD), whoever's in it (a 2MD, a
+## utility, anyone filling it): Swimmer.two_md.
+const TWO_MD_PLACE := 4
 ## Counterattacks (see _counter): the break picks up with the ball about COUNTER_PICKUP m up the
 ## pool. When the ball changes hands the new attackers are already facing the right way and
 ## react in ATTACK_REACT s; the team that lost it has to turn round first (DEFENCE_TURN s, and
@@ -45,6 +48,7 @@ static func build(p: Play, snap: Dictionary = {}) -> void:
 		var d := Swimmer.new(dfield[i], Swimmer.Side.THEM)
 		d.mark = p.attackers[i]
 		d.dtag = p.attackers[i].tag
+		d.two_md = theirs.size() > TWO_MD_PLACE and dfield[i] == theirs[TWO_MD_PLACE]
 		p.defenders.append(d)
 	p.keeper = Swimmer.new(theirs[0], Swimmer.Side.THEM, true)
 	mark_gone(p)

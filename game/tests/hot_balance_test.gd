@@ -65,11 +65,46 @@ func _everyone() -> void:
 	keeper.heat = 0
 	# a CPU keeper earns stars from his own saves, the same rule
 	var k := keeper
+	k.form = []   # (a clean run: his own week's grades, and any CPU coaching, left out)
+	k.heat_bonus = 0.0
 	var t: PoloTeam = c.teams.values().filter(func(tt): return tt.id != c.school)[0]
 	for i in 3:
 		var line := {k.id: {"gk": true, "sv": 20, "ga": 0}}
 		PlayerForm.grade_team(t, line, {})
 	r.check(k.heat == 1, "9: a CPU keeper heats up on three big games like anyone")
+	_cpu_coach(c)
+
+## CPU coaches: your coaching events' HOT STAR help, for their players, on the same conditions.
+func _cpu_coach(c: Career) -> void:
+	var t: PoloTeam = c.teams.values().filter(func(q): return q.id != c.school)[1]
+	var young: PoloPlayer = t.starters().slice(1).filter(func(q: PoloPlayer): return true)[0]
+	var cold: PoloPlayer = t.starters()[2]
+	young.year = 2
+	young.heat_bonus = 0.0
+	var star := {young.id: {"g": 4, "sh": 5}}
+	var got := {}
+	for w in 60:
+		young.heat_bonus = 0.0
+		c.week = w
+		var res := CoachEvents.cpu_coach(c, t, star)
+		if not res.is_empty():
+			got[String(res.id)] = is_equal_approx(young.heat_bonus, CoachEvents.HOT.star_praise)
+	r.check(got.get("star_in_making", false) and got.size() == 1, "CPU: A STAR IN THE MAKING's +HOT STAR PROGRESS for a young CPU scorer")
+	var n := 0
+	for w in 60:
+		cold.form = [-1, -1, 0]
+		c.week = w
+		if String(CoachEvents.cpu_coach(c, t, {cold.id: {"g": 0, "sh": 6}}).get("id", "")) == "rough_night":
+			n += 1
+			r.check(cold.form == [0, 0, 0], "CPU: A ROUGH NIGHT forgives his last two BAD grades")
+	r.check(n > 0 and n < 30, "CPU: drawn at about your rate when it fits (%d of 60, ~%d expected)" % [n, roundi(60 * CoachEvents.CPU_DRAW.rough_night)])
+	young.heat_bonus = 0.0
+	var mine: PoloPlayer = c.team().starters()[1]
+	mine.heat_bonus = 0.0
+	for w in 60:
+		c.week = w
+		CoachEvents.cpu_coach(c, c.team(), {mine.id: {"g": 4, "sh": 5}})
+	r.check(mine.heat_bonus == 0.0, "CPU: your team's help is still only your coaching events")
 
 ## HOT STAR TESTING: CPU schools, progress, the multiplier, the thresholds; nothing real touched.
 func _lab() -> void:

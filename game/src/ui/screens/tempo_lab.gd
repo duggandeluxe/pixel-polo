@@ -45,7 +45,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 func _process(dt: float) -> void:
 	if balls.is_empty():

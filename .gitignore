@@ -40,3 +40,9 @@ __pycache__/
 *.pem
 *.p8
 export_credentials.cfg
+# packaged builds (the itch.io ZIP) and stray test screenshots
+/dist/
+/game/break_*.png
+/game/break_*.png.import
+/game/goal_*.png
+/game/goal_*.png.import

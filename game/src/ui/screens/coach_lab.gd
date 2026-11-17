@@ -61,7 +61,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")   # (as every Developer Mode lab)
+	Game.back("dev_settings")   # (as every Developer Mode lab)
 
 func _refresh() -> void:
 	for ch in body.get_children():
@@ -328,7 +328,7 @@ static func simulate(c: Career, eid: int, success: bool) -> Dictionary:
 	if got.has(pid):
 		var g: Dictionary = got[pid]
 		out.append(["%s GAME XP: %d -> %d%s" % [CoachEvents._name(c2, pid), int(g.get("base", g.xp)), int(g.xp), (" (%s)" % CoachEvents.mx(float(g.mult))) if g.has("mult") else ""], "info"])
-	out.append(["TEAM XP IN ALL: %+d   CREDITS: %+d" % [CoachEvents.xp_sum(t) - x0, c2.credits - w0], "info"])
+	out.append(["TEAM XP IN ALL: %+d   %+d{coin}" % [CoachEvents.xp_sum(t) - x0, c2.credits - w0], "info"])
 	if him != null and not is_equal_approx(him.heat_bonus, h0):
 		out.append(["%s HOT STAR PROGRESS: %+d%%" % [CoachEvents._name(c2, pid), roundi((him.heat_bonus - h0) / PlayerForm.HOT_AT * 100.0)], "info"])
 	if him != null and s0 > 0:
@@ -448,18 +448,19 @@ func _show_preview(pr: Dictionary) -> void:
 static func reward_of(e: Dictionary) -> String:
 	match String(e.get("k", "")):
 		"team": return "+%d XP EACH TO ALL WHO PLAY" % int(e.get("xp", 0))
-		"invest": return "+%d CREDITS" % int(e.get("coins", 0))
+		"invest": return "+%d{coin}" % int(e.get("coins", 0))
 		"pmw": return "TEAM %s GAME XP, HIM %s" % [CoachEvents.mx(CoachEvents.PMW_WIN), CoachEvents.mx(CoachEvents.MULT_2X)]
 		"susp": return "REPLACEMENT %s GAME XP IF HE PLAYS" % CoachEvents.mx(float(e.get("mult", 2.0)))
+	var hot := ", +%d%% HOT STAR PROGRESS" % CoachEvents._pp(float(e.get("hot_gain", e.get("hot_loss", 0.0)))) if e.has("hot_gain") or e.has("hot_loss") else ""
 	if e.has("xp"):
-		return "+%d XP" % int(e.xp)
+		return "+%d XP" % int(e.xp) + hot
 	if e.has("mult"):
-		return "%s GAME XP" % CoachEvents.mx(float(e.mult))
+		return "%s GAME XP" % CoachEvents.mx(float(e.mult)) + hot
 	return "-"
 
 static func penalty_of(e: Dictionary) -> String:
 	match String(e.get("k", "")):
-		"invest": return "THE %d CREDITS ARE GONE" % CoachEvents.COINS.ripple_cost
+		"invest": return "THE %d{coin} ARE GONE" % CoachEvents.COINS.ripple_cost
 		"pmw": return "TEAM %s GAME XP, HIS XP BAR RESET" % CoachEvents.mx(CoachEvents.PMW_LOSS)
 		"susp": return "NONE (HE SERVES THE GAME)"
 	var out := "%s GAME XP" % CoachEvents.mx(float(e.fail_mult)) if e.has("fail_mult") else "NONE (NORMAL GAME XP)"
@@ -594,9 +595,7 @@ func _choice(v: VBoxContainer, letter: String, ch: Dictionary, st: Array, nm: St
 	v.add_child(box)
 
 func _stake(s: Array) -> Control:
-	var l := para("  " + String(s[0]), UI.GOLD if s[1] == "good" else (RED if s[1] == "bad" else UI.ACCENT), 150)
-	l.add_theme_font_override("font", UI.font_caps)
-	return l
+	return _capc("  " + String(s[0]), 8, UI.GOLD if s[1] == "good" else (RED if s[1] == "bad" else UI.ACCENT), "caps", 150)
 
 ## How often: the event's category's share, its weight within the category, its cooldown.
 static func _freq(id: String) -> String:
@@ -702,7 +701,7 @@ func _confirm_trigger() -> void:
 		Sfx.play("error")
 		return
 	var head := String(CoachEvents.scenario(sel).headline)
-	Game.dialog("TRIGGER A REAL EVENT?", "%s%s will open as a real coaching event in your save. Your answer is applied for real: XP, credits, HOT/COLD progress, suspensions, lineup changes and next-game challenges.\n\nUse PREVIEW EVENT to look without changing anything." % [head, " (SPECIAL 3X)" if special and CoachEvents.SPECIAL.has(sel) else ""], [
+	Game.dialog("TRIGGER A REAL EVENT?", "%s%s will open as a real coaching event in your save. Your answer is applied for real: XP, Polo Points, HOT/COLD progress, suspensions, lineup changes and next-game challenges.\n\nUse PREVIEW EVENT to look without changing anything." % [head, " (SPECIAL 3X)" if special and CoachEvents.SPECIAL.has(sel) else ""], [
 		["TRIGGER", func(): trigger(car, sel, pick_pid, special, ignore_reqs), "danger"],
 		["CANCEL", Callable(), "ghost"]])
 
@@ -740,11 +739,9 @@ func _active_tab() -> void:
 		bh.add_child(no)
 		for kv in [["PLAYER", CoachEvents._name(car, int(e.pid))], ["OBJECTIVE", String(e.label)], ["WHEN", target_of(e)],
 				["REWARD", reward_of(e)], ["FAILURE", penalty_of(e)], ["STATUS", "PENDING"]]:
-			b.add_child(_cap("%s: %s" % kv, 8, UI.TEXT if kv[0] != "FAILURE" else RED, "caps"))
+			b.add_child(_capc("%s: %s" % kv, 8, UI.TEXT if kv[0] != "FAILURE" else RED, "caps"))
 		for ln in sim_out.get(eid, []):
-			var l := para(String(ln[0]), UI.GOLD if ln[1] == "good" else (RED if ln[1] == "bad" else UI.ACCENT), 440)
-			l.add_theme_font_override("font", UI.font_caps)
-			b.add_child(l)
+			b.add_child(_capc(String(ln[0]), 8, UI.GOLD if ln[1] == "good" else (RED if ln[1] == "bad" else UI.ACCENT), "caps", 440))
 		b.add_child(bh)
 		var p := navy_panel(b)
 		p.name = "Pending_%d" % eid
@@ -752,6 +749,16 @@ func _active_tab() -> void:
 	for p: PoloPlayer in car.team().roster:
 		if p.is_suspended():
 			v.add_child(UI.label("%s SUSPENDED: %d GAME%s" % [player_text(p), p.susp, "" if p.susp == 1 else "S"], 8, RED, "caps"))
+
+## _cap with its Polo Points drawn as the coin ("+50{coin}"): a wrapped coin line when it has one.
+func _capc(t: String, size: int = 8, col: Color = UI.TEXT, _font: String = "caps", w: int = 100) -> Control:
+	if not CreditCoin.has_tag(t):
+		var l := _cap(t, size, col)
+		l.custom_minimum_size.x = w
+		return l
+	var rl := CreditCoin.rich(t, size, col, "caps", float(w))
+	rl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return rl
 
 ## A wrapped caps line (UI.label's arguments): long lines never widen the page.
 func _cap(t: String, size: int = 8, col: Color = UI.TEXT, _font: String = "caps") -> Label:
@@ -966,9 +973,9 @@ func _history_tab() -> void:
 		var b := UI.vbox(0)
 		b.add_child(_cap("%s  |  %s  |  %s  |  %s%s%s" % [String(d.when), String(d.title), String(d.name), String(d.choice),
 			"  SPECIAL" if d.special else "", "  DEV" if d.dev else ""], 8, UI.TEXT, "caps"))
-		b.add_child(_cap("XP %+d   CREDITS %+d%s" % [int(d.xp), int(d.credits), "   SUSPENSION +%d GAME" % int(d.susp) if int(d.susp) > 0 else ""], 8, UI.ACCENT, "caps"))
+		b.add_child(_capc("XP %+d   %+d{coin}%s" % [int(d.xp), int(d.credits), "   SUSPENSION +%d GAME" % int(d.susp) if int(d.susp) > 0 else ""], 8, UI.ACCENT, "caps"))
 		for ln in d.lines:
-			b.add_child(_cap("  " + String(ln[0]).to_upper(), 8, UI.DIM, "caps"))
+			b.add_child(_capc("  " + String(ln[0]).to_upper(), 8, UI.DIM, "caps"))
 		var p := navy_panel(b)
 		p.name = "Decision_%d" % i
 		v.add_child(p)
@@ -986,7 +993,7 @@ func _history_tab() -> void:
 		b.add_child(_cap("%s - %s" % [{"ok": "SUCCESS", "fail": "FAILURE", "even": "NORMAL GAME XP", "void": "VOID"}.get(oc, oc), String(r.note).to_upper()], 8,
 			UI.GOLD if oc == "ok" else (RED if oc == "fail" else UI.ACCENT), "caps"))
 		for ln in r.get("lines", []):
-			b.add_child(_cap("  " + String(ln[0]).to_upper(), 8, UI.DIM, "caps"))
+			b.add_child(_capc("  " + String(ln[0]).to_upper(), 8, UI.DIM, "caps"))
 		var p := navy_panel(b)
 		p.name = "Settled_%d" % i
 		v.add_child(p)

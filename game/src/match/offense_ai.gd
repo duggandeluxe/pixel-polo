@@ -77,7 +77,28 @@ const PISTON_SWING := 0.08    # the quick ball between the two pistons' men...
 const PISTON_SEE := 0.6       # ...when he spots it (not every look: it's a habit, not a script)
 const CENTER_HURRY := 0.9     # the centre with the ball and the dropper this many seconds off: act now
 const HURRY_SHOT := 0.3       # ...a shot this good, or the ball back out
-const EXPLOIT_SEE := Vector2(0.35, 0.8)   # the chance he sees a gap the defence has left (easy .. hard)
+## The end of a period (the game clock, `quarter_left`, never the shot clock): a shot before the
+## buzzer, from wherever he is. See _final.
+const FINAL := 5.0             # game-clock seconds left: every look is a look for the last shot
+const SURE := 3.0              # ...from here he shoots whatever he has, bar a much better look a pass away
+const LAST_GASP := 1.0         # ...and from here he just lets it go
+const FINAL_THINK := 0.1       # (MatchFlow: he looks this often in the last seconds, every frame from LAST_GASP)
+const FINAL_PASSES := 1        # passes he'll make in the last seconds: one quick one at most
+const FINAL_EDGE := Vector2(0.15, 0.3)   # how much better the pass's look has to be: FINAL..SURE, SURE..LAST_GASP
+const FINAL_MARGIN := 0.3      # game-clock seconds to spare on a last pass (the catch, a bobble)
+## Not the same shot every time: the team remembers where its last few shots came from (`history`,
+## this match, MatchFlow's per team), and a look from that same water is worth less for each, the
+## most recent the most. So once a drop has given up one spot a few times, the attack works the
+## ball for something else (it still takes it when nothing better turns up as the clock runs down).
+const REPEAT_KEEP := 6         # shots remembered
+const REPEAT_R := 1.5          # m: a look this close to one of them is "the same spot"
+const REPEAT_COST := 0.06      # ...worth this much less for each (the latest; older ones less: REPEAT_FADE)
+const REPEAT_FADE := 0.8
+const REPEAT_MAX := 0.18
+## The shooter's side of the goal: most shots go across the keeper (the side he isn't on), but
+## this often he goes near post instead, more often when the keeper's cheated across (NEAR_CHEAT).
+const NEAR_POST := 0.2
+const NEAR_CHEAT := 0.35       # ...more by this, the keeper a full metre off the middle away from the shooter's side
 
 var passes := 0
 var pairs := {}                # "a|b" (the two men, either way round) -> passes between them
@@ -88,12 +109,18 @@ var tally := {}                # every decision this possession, by `why`
 ## How quickly his team plays (MatchFlow.opp_tempo, a share of the normal time): the possession
 ## runs on its clock, so an elite team gets through its patient phase and to its shot sooner.
 var pace := 1.0
-var iq := Difficulty.MEDIUM
+var iq := Difficulty.BASELINE
 var seen_for: Swimmer = null   # who the last look at the defence's gaps was for (exploit), and what he saw
 var seen := false
+## Game-clock seconds left in the period (MatchFlow sets it every look; INF: no buzzer to beat).
+var quarter_left := INF
+var late_passes := 0           # passes made inside the last FINAL seconds
+var history: Array = []        # this team's last REPEAT_KEEP shots this match (Vector2), MatchFlow's: never reset here
 
 func reset() -> void:
 	passes = 0
+	late_passes = 0
+	quarter_left = INF
 	pairs.clear()
 	last_from = null
 	tally.clear()
@@ -104,6 +131,8 @@ func reset() -> void:
 ## and then the passer cuts for the goal behind it (a give-and-go), if he has the water to.
 func passed(p: Play, from: Swimmer, to: Swimmer, rng: RandomNumberGenerator) -> void:
 	passes += 1
+	if quarter_left <= FINAL:
+		late_passes += 1
 	last_from = from
 	if to != null:
 		var k := _pair(from, to)
@@ -146,9 +175,20 @@ func quick_shot(p: Play) -> bool:
 		and shot_quality(p, h, h.pos, p.catch_t) >= bar(p) - (OPEN_LOOK if left_open_look(p, h) else 0.0)
 
 ## `s` is the man the formation has left (his own defender off him on another job) and he has the
-## water: the look the formation gives away.
+## water: the look the formation gives away, worth taking before they're back (OPEN_LOOK,
+## OPEN_QUICK). Only a fresh one: his man gone to help, closing on someone else, crashing or still
+## on his way back. A drop's standing gap (his man sat on his SAG / DROP / SPLIT spot all
+## possession) isn't going anywhere: against that the attack stays patient and works the ball (it's
+## still a good look: LEFT_OPEN on a pass to him, and shot_quality's open water).
 func left_open_look(p: Play, s: Swimmer) -> bool:
-	return DefenseFormation.left_open(p, s) and _space(p, s, s.pos) > LEFT_OPEN_ROOM
+	return DefenseFormation.left_open(p, s) and _space(p, s, s.pos) > LEFT_OPEN_ROOM and not standing_gap(p, s)
+
+const STANDING := [DefenseFormation.Duty.SAG, DefenseFormation.Duty.DROP, DefenseFormation.Duty.SPLIT]
+
+## `s`'s own defender is off him on the formation's standing job (STANDING), not a passing one.
+func standing_gap(p: Play, s: Swimmer) -> bool:
+	var own := DefenseFormation.by_tag(p.defenders, s.tag, true)
+	return own != null and own.duty in STANDING
 
 ## One look at the ball. `clock`: the time left to get a shot off (the shot clock, or the game
 ## clock if that's shorter). Returns {} (keep it) or {target, power}.
@@ -158,6 +198,8 @@ func think(p: Play, rng: RandomNumberGenerator, pressed: bool, clock: float) -> 
 	var h := p.holder
 	if p.kind == Play.Kind.PENALTY:
 		return _shot(p, rng)
+	if quarter_left <= FINAL:
+		return _final(p, rng)
 	var can_shoot := _can_shoot(p)
 	# the centre with the ball and the dropper coming at him: he has a moment, then it's the
 	# dropper's (DefenseFormation.interference). A shot if there's one, else back out with it.
@@ -255,14 +297,77 @@ func think(p: Play, rng: RandomNumberGenerator, pressed: bool, clock: float) -> 
 	_decided("wait", own)
 	return {}
 
+## The period's last FINAL seconds: he gets a shot away before the buzzer. Outside 6 m too (the
+## only time the AI shoots from out there): a desperation shot, as hard as ShotModel makes any
+## shot from that far. Until SURE, one quick pass to a clearly better look in range if it gets
+## there with time to shoot, or the break / a drive carrying him in out of range; then only a
+## much better look is worth the pass; from LAST_GASP, the shot. None of it gets round the
+## rules: a free throw inside 6 m still has to be passed (Play.shot_barred), to a man in range.
+## The wind-up is as ever (MatchFlow): let it go too late and the buzzer beats it.
+func _final(p: Play, rng: RandomNumberGenerator) -> Dictionary:
+	var h := p.holder
+	var t := quarter_left
+	if p.shot_barred():
+		var out := _best_pass(p, rng, 0.0, 0.0, true, true)
+		if out.is_empty():
+			out = _freest_mate(p)
+		_decided("final_pass", 0.0)
+		return {} if out.is_empty() else out.throw
+	var own := shot_quality(p, h, h.pos, p.catch_t) + rng.randfn(0.0, Difficulty.value("eval_noise", iq))
+	if t > LAST_GASP and late_passes < FINAL_PASSES:
+		var feed := _final_pass(p, rng, own + (FINAL_EDGE.x if t > SURE else FINAL_EDGE.y))
+		if not feed.is_empty():
+			_decided("final_pass", own)
+			return feed
+	if t > SURE and not Geo.in_shot_range(h.pos):
+		# out of range with a moment yet: the break carries him in, or he swims it in
+		if p.carry or h.drive_t > 0.0 or _start_drive(p, rng):
+			_decided("final_move", own)
+			return {}
+	_decided("final", own)
+	return _shot(p, rng)
+
+## The last-seconds pass: the best look (shot_quality where he'd catch it) better than `beat`, at
+## a man inside 6 m with a safe lane, that gets there with time for him to shoot. {} if none.
+func _final_pass(p: Play, rng: RandomNumberGenerator, beat: float) -> Dictionary:
+	var h := p.holder
+	var no_back := p.back_pass_barred()
+	var overlook := Difficulty.value("overlook", iq)
+	var best := {}
+	var best_q := beat
+	for a in p.attackers:
+		if a == h or a.out or rng.randf() < overlook:
+			continue
+		var lead := a.pos + a.vel * 0.3
+		var at := p.lead_point(a)
+		if not Geo.in_shot_range(at) or (no_back and Play.is_back_pass(h.pos, lead)):
+			continue
+		if p.pass_risk(lead, a) != null or _lane_room(p, h.pos, lead, a) < PASS_ROOM:
+			continue
+		if quarter_left <= _pass_cost(h, a, at):
+			continue   # it wouldn't get there with time to shoot it
+		var q := shot_quality(p, a, at, 0.0 if _space(p, a, a.pos) > QUICK_OPEN else INF)
+		if q > best_q:
+			best_q = q
+			best = {"target": lead, "power": 0.5}
+	return best
+
+## Game-clock seconds from now until `to` lets a shot go, if `from` passes it to him at `at`: the
+## pass's wind-up and flight, his look and his wind-up (MatchFlow's timings), and a little spare.
+func _pass_cost(from: Swimmer, to: Swimmer, at: Vector2) -> float:
+	var live := MatchFlow.OPP_PASS_WINDUP * pace + from.pos.distance_to(at) / Play.PASS_SPEED \
+		+ FINAL_THINK + MatchFlow.OPP_SHOT_WINDUP * KeeperDuel.WINDUP * Attributes.release_mult(to.player)
+	return live * MatchState.CLOCK_SPEED + FINAL_MARGIN
+
 func _decided(w: String, q: float) -> void:
 	why = w
 	why_q = q
 	tally[w] = int(tally.get(w, 0)) + 1
 
 # ------------------------------------------------------------------ shots
-## Never from outside 6 m (Geo.in_shot_range), however late it is: from out there he passes or
-## swims it in, and if the clock runs out first that's a shot clock violation.
+## Never from outside 6 m (Geo.in_shot_range), however late the shot clock is: from out there he
+## passes or swims it in, and if the clock runs out first that's a shot clock violation. (The end
+## of a period is the one exception: _final.)
 func _can_shoot(p: Play) -> bool:
 	return Geo.in_shot_range(p.holder.pos) and not p.shot_barred()
 
@@ -282,7 +387,7 @@ func shot_quality(p: Play, s: Swimmer, at: Vector2, catch_t: float) -> float:
 		q *= 1.1
 	if s == p.holder and _lane_shut(p):
 		q *= 0.4
-	q += 0.12 * ShotModel.catch_shoot(catch_t)
+	q += 0.12 * ShotModel.catch_shoot(catch_t, p.cs_k)
 	var aim_y := _aim_y(p, at)
 	q += 0.1 * ShotModel.cross_cage(at, aim_y, p.keeper.pos.y)
 	if centre:
@@ -290,7 +395,17 @@ func shot_quality(p: Play, s: Swimmer, at: Vector2, catch_t: float) -> float:
 	q *= lerpf(0.85, 1.15, clampf(s.player.live("shoot") / 100.0, 0.0, 1.0))
 	if s.player.trait_id in ["cannon", "ice"] and d < 8.0:
 		q += 0.04
-	return q
+	return q - repeat_cost(at)
+
+## How much less a look from `at` is worth for the team's recent shots from the same water.
+func repeat_cost(at: Vector2) -> float:
+	var c := 0.0
+	var w := 1.0
+	for i in range(history.size() - 1, -1, -1):
+		if (history[i] as Vector2).distance_to(at) <= REPEAT_R:
+			c += REPEAT_COST * w
+		w *= REPEAT_FADE
+	return minf(c, REPEAT_MAX)
 
 ## The man with the ball's guard has a hand up in both his lanes (far post and near post).
 func _lane_shut(p: Play) -> bool:
@@ -302,12 +417,22 @@ func _lane_shut(p: Play) -> bool:
 func _aim_y(p: Play, _at: Vector2) -> float:
 	return Geo.GOAL_Y + (1.15 if p.keeper.pos.y < Geo.GOAL_Y else -1.15)
 
-## The shot itself: far side of the keeper, the near side if a hand is up in that lane; or,
-## when he doesn't pick it well ("aim_smart"), a spot you can read: his own side of the goal,
-## the near post. Power and the wrist are as before (ShotModel's spread is the AI's accuracy, the
-## same at every level).
+## The shot itself: far side of the keeper, or now and then (NEAR_POST, more with the keeper
+## cheating across) the near post; the other side if a hand is up in that lane; or, when he
+## doesn't pick it well ("aim_smart"), a spot you can read: his own side of the goal, the near
+## post. Power and the wrist are as before (ShotModel's spread is the AI's accuracy, the same at
+## every level). Remembered for `history`.
 func _shot(p: Play, rng: RandomNumberGenerator) -> Dictionary:
+	why_q += repeat_cost(p.holder.pos)   # (the stats: the look he took, not what the memory made of it)
+	history.append(p.holder.pos)
+	while history.size() > REPEAT_KEEP:
+		history.pop_front()
 	var y := _aim_y(p, p.holder.pos) + rng.randf_range(-0.2, 0.2) * signf(Geo.GOAL_Y - p.keeper.pos.y + 0.001)
+	var side := signf(p.holder.pos.y - Geo.GOAL_Y) if absf(p.holder.pos.y - Geo.GOAL_Y) > 0.5 else 0.0
+	if side != 0.0:
+		var cheat := clampf((Geo.GOAL_Y - p.keeper.pos.y) * side, 0.0, 1.0)   # (the keeper off the middle, away from the shooter's side)
+		if rng.randf() < NEAR_POST + NEAR_CHEAT * cheat:
+			y = Geo.GOAL_Y + side * rng.randf_range(0.95, 1.2)   # near post
 	if rng.randf() >= Difficulty.value("aim_smart", iq):
 		var own_side := signf(p.holder.pos.y - Geo.GOAL_Y)
 		y = Geo.GOAL_Y + (own_side if own_side != 0.0 else 1.0) * rng.randf_range(0.6, 1.0)
@@ -336,12 +461,15 @@ func _best_pass(p: Play, rng: RandomNumberGenerator, own: float, need: float, an
 	var best_v := -INF
 	var overlook := Difficulty.value("overlook", iq)
 	var noise := Difficulty.value("eval_noise", iq)
+	var no_back := p.back_pass_barred()
 	for a in p.attackers:
 		if a == h or a.out:
 			continue
 		if not any and rng.randf() < overlook:
 			continue   # he doesn't see him this look
 		var lead := a.pos + a.vel * 0.3
+		if no_back and Play.is_back_pass(h.pos, lead):
+			continue   # on the counter, with men still to come over halfway: forward or square only
 		if p.pass_risk(lead, a) != null:
 			continue
 		if not any and a.tag == "C" and p.entry_closing(a):
@@ -402,10 +530,13 @@ func _freest_mate(p: Play) -> Dictionary:
 	var h := p.holder
 	var best := {}
 	var best_v := -INF
+	var no_back := p.back_pass_barred()
 	for a in p.attackers:
 		if a == h or a.out:
 			continue
 		var lead := a.pos + a.vel * 0.3
+		if no_back and Play.is_back_pass(h.pos, lead):
+			continue   # (the counter: see _best_pass)
 		var v := _space(p, a, a.pos) - (1.0 if p.pass_risk(lead, a) != null else 0.0)
 		if v > best_v:
 			best_v = v
@@ -451,7 +582,7 @@ func _press_center(p: Play, c: Swimmer) -> float:
 ## Has the man with the ball spotted a gap the formation has left right now (a man left open by a
 ## help or a drop with room, a piston still swimming back, the dropper about to get to the
 ## centre)? Then he moves it on quickly (MatchFlow: a shorter look). One look a catch, and he
-## only sees it EXPLOIT_SEE of the time (his iq): not every opening, not instantly.
+## only sees it Difficulty "exploit_see" of the time (his iq): not every opening, not instantly.
 func exploit(p: Play, rng: RandomNumberGenerator) -> bool:
 	var h := p.holder
 	if h == null or not DefenseFormation.active(p) or not DefenseFormation.drops(p.formation):
@@ -465,7 +596,7 @@ func exploit(p: Play, rng: RandomNumberGenerator) -> bool:
 		for a in p.attackers:
 			if a != h and DefenseFormation.left_open(p, a) and _space(p, a, a.pos) > LEFT_OPEN_ROOM + 0.5:
 				gap = true
-		seen = gap and rng.randf() < lerpf(EXPLOIT_SEE.x, EXPLOIT_SEE.y, iq)
+		seen = gap and rng.randf() < Difficulty.value("exploit_see", iq)
 	return seen
 
 ## Metres from the line of a pass to `to` (its middle, where it can be picked off) to the nearest
@@ -515,7 +646,7 @@ func _start_drive(p: Play, rng: RandomNumberGenerator) -> bool:
 	var guard := p.on_ball_guard(h)
 	var beaten := guard == null or guard.pos.distance_to(h.pos) > DRIVE_GUARD_OFF \
 		or PlayDefense.side_of(guard, h) != PlayDefense.Zone.FRONT
-	var here := spot_quality(h.pos)
+	var here := spot_quality(h.pos) - repeat_cost(h.pos)   # (a spot the team keeps shooting from: worth swimming off)
 	# his own man is off him (splitting, dropped, helping) with room: the water's there to take
 	var open := DefenseFormation.left_open(p, h) and _space(p, h, h.pos) > LEFT_OPEN_ROOM
 	var clear := DRIVE_CLEAR * (OPEN_DRIVE_CLEAR if open else 1.0)
@@ -543,7 +674,7 @@ func _start_drive(p: Play, rng: RandomNumberGenerator) -> bool:
 		var into_range := i >= first_in
 		if PlayAI.lane_space(p, h.pos + dir * 0.6, to, null if into_range and not beaten else guard) < clear:
 			continue
-		var gain := spot_quality(to) - here
+		var gain := spot_quality(to) - repeat_cost(to) - here
 		if out_of_range and Geo.in_shot_range(to):
 			gain += IN_RANGE_GAIN
 		if gain > best_gain:

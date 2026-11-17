@@ -73,7 +73,7 @@ func _limits() -> void:
 
 # ------------------------------------------------------------------ the unified star bar
 func _star_bar() -> void:
-	var f := Deck.star_fills(3.25, 4.25, PlayerForm.red_stars(PlayerForm.VERY_HOT))
+	var f := Deck.star_fills(3.0, 4.25, PlayerForm.red_stars(PlayerForm.VERY_HOT))
 	r.check(f.size() == Deck.STAR_PLACES, "five places, no more")
 	var gold := 0.0
 	var pot := 0.0
@@ -89,7 +89,14 @@ func _star_bar() -> void:
 		calm_gold += float(calm[i].gold)
 		calm_pot += float(calm[i].pot)
 	r.check(is_equal_approx(calm_gold, 3.5) and is_equal_approx(calm_pot, 4.5), "3.25 / 4.25 drawn to the nearest half: 3.5 gold, 4.5 to POTENTIAL")
-	r.check(is_equal_approx(red, 2.0) and is_equal_approx(gold, 3.0) and f[4].form_col == PlayerForm.FIRE_RED, "VERY HOT: two whole red stars, the gold giving way where the five run out")
+	r.check(is_equal_approx(red, 2.0) and is_equal_approx(gold, 3.0) and f[4].form_col == PlayerForm.FIRE_RED, "VERY HOT: two whole red stars after three gold")
+	var half := Deck.star_fills(3.25, 4.25, PlayerForm.red_stars(PlayerForm.VERY_HOT))
+	r.check(half.size() == 6 and is_equal_approx(float(half[3].gold), 0.5) and float(half[3].form) <= 0.5
+		and float(half[4].form) > float(half[4].gold) and float(half[5].form) > float(half[5].gold),
+		"a 3.5 VERY HOT: three gold, his half star kept, THEN two red (six places)")
+	var five := Deck.star_fills(5.0, 5.0, PlayerForm.red_stars(PlayerForm.VERY_HOT))
+	r.check(five.size() == Deck.STAR_PLACES + 2 and float(five[4].gold) >= 1.0 and float(five[5].form) > float(five[5].gold) and float(five[6].form) > float(five[6].gold),
+		"a five-star VERY HOT: five gold, then two red (seven places)")
 	var normal := Deck.star_fills(3.0, 5.0, 0)
 	var empty_pot := 0
 	for i in Deck.STAR_PLACES:

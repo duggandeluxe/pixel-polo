@@ -1,5 +1,5 @@
 extends BaseScreen
-## A COACHING EVENT (CoachEvents), on its own screen after the POSTGAME REVIEW, filling the page:
+## A COACHING EVENT (CoachEvents), on its own screen after PLAYER DEVELOPMENT (the postgame bulletin board), filling the page:
 ##   THE STORY      his own portrait (Portrait: skin, cap, face, as everywhere) or, for a team
 ##                  event, the school's logo; the headline, who it's about, 3-5 sentences told
 ##                  from the game's own numbers, and what the game recorded for him
@@ -225,9 +225,7 @@ func _choice(i: int, ch: Dictionary) -> Control:
 		box.add_child(para(fill(String(ch.text)), UI.DIM, 200))
 	box.add_child(UI.spacer(0, 2))
 	for s in CoachEvents.stakes(c, ev, i):
-		var l := para(String(s[0]), _kind_col(String(s[1])), 200)
-		l.add_theme_font_override("font", UI.font_caps)
-		box.add_child(l)
+		box.add_child(caps_line(String(s[0]), _kind_col(String(s[1])), 200))
 	if why != "":
 		var w := para(why, RED, 200)
 		w.name = "Blocked"
@@ -241,16 +239,44 @@ func _choice(i: int, ch: Dictionary) -> Control:
 	b.name = "Choice%d" % i
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.set_meta("blocked", why)
+	# the choices are cards: navy with the panel bevel; the picked one a 2 px gold edge on a warmer
+	# fill (opaque: the red lines stay readable); hovered, a brighter edge; pressed, sunk
 	if pick == i:
-		var sel := UI.sb(Deck.NAVY.lerp(UI.GOLD, 0.12), UI.GOLD, 2, 4, 3)   # (opaque: the red lines stay readable)
-		for st in ["normal", "hover", "pressed", "focus"]:
+		var sel := UI.chunky(Deck.NAVY.lerp(UI.GOLD, 0.12), UI.GOLD, false, false, 4, 3, UI.BEVEL_DOUBLE)
+		for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 			b.add_theme_stylebox_override(st, sel)
 	else:
 		var edge := Color(UI.GOLD, 0.7) if special else UI.BORDER
-		b.add_theme_stylebox_override("normal", UI.sb(Deck.NAVY, edge if why == "" else Color(UI.BORDER, 0.3), 1, 4, 3))
+		if why != "":
+			edge = Color(UI.BORDER, 0.3)
+		b.add_theme_stylebox_override("normal", UI.chunky(Deck.NAVY, edge, false, false, 4, 3, UI.BEVEL_SOFT))
+		if why == "":
+			b.add_theme_stylebox_override("hover", UI.chunky(Deck.ROW_HOVER, UI.hover_edge(edge) if not special else UI.GOLD, false, false, 4, 3, UI.BEVEL_SOFT))
+			for st in ["pressed", "hover_pressed"]:
+				b.add_theme_stylebox_override(st, UI.chunky(Deck.NAVY.darkened(0.15), UI.GOLD, false, false, 4, 3, UI.BEVEL_SUNK))
 	if why != "":
 		b.modulate = Color(1, 1, 1, 0.6)
 	return b
+
+## A line of the event's caps text, its Polo Points drawn as the coin ("-15{coin}: ..."; an older
+## save's "-15 PP" too). Wrapped at `w` when given; a plain caps Label when there's no amount.
+func caps_line(t: String, col: Color, w: int = 0) -> Control:
+	t = coins(t)
+	if CreditCoin.has_tag(t):
+		var rl := CreditCoin.rich(t, 8, col, "caps", float(w))
+		rl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		return rl
+	if w <= 0:
+		return UI.label(t, 8, col, "caps")
+	var l := para(t, col, w)
+	l.add_theme_font_override("font", UI.font_caps)
+	return l
+
+static var _PP := RegEx.create_from_string("(\\d) ?PP\\b")
+
+## "15 PP" -> "15{coin}" (text written before amounts carried the coin).
+static func coins(t: String) -> String:
+	return _PP.sub(t, "$1" + CreditCoin.TAG, true)
 
 func _kind_col(k: String) -> Color:
 	match k:
@@ -269,8 +295,9 @@ func _active_box() -> Control:
 	if lines.is_empty():
 		v.add_child(UI.label("NONE YET: PICK AN ANSWER, THEN CONFIRM", 8, UI.DIM, "caps"))
 	for ln in lines:
-		var l := UI.label(String(ln), 8, UI.ACCENT, "caps")
-		l.clip_text = true
+		var l := caps_line(String(ln), UI.ACCENT)
+		if l is Label:
+			l.clip_text = true
 		v.add_child(l)
 	return v
 
@@ -302,8 +329,9 @@ func _record_line() -> String:
 
 ## The scenario's words with this game's numbers in them ({name}, {saves}...).
 func fill(t: String) -> String:
+	t = Loc.t(t)   # (the player's LANGUAGE: the scenario's words first, then its names and numbers)
 	for k in ev.get("vars", {}):
-		t = t.replace("{%s}" % k, str(ev.vars[k]))
+		t = t.replace("{%s}" % k, Loc.t(str(ev.vars[k])))
 	return t
 
 func _confirm() -> void:
@@ -334,9 +362,7 @@ func _render_answer(page: VBoxContainer) -> void:
 	for ln in result:
 		if String(ln[0]) == "":
 			continue
-		var l := para(String(ln[0]).to_upper(), _kind_col(String(ln[1])), 440)
-		l.add_theme_font_override("font", UI.font_caps)
-		v.add_child(l)
+		v.add_child(caps_line(String(ln[0]).to_upper(), _kind_col(String(ln[1])), 440))
 	page.add_child(navy_panel(v))
 	page.add_child(_continue_row())
 
@@ -400,9 +426,7 @@ func _result_panel(r: Dictionary) -> Control:
 	if String(r.note) != "":
 		v.add_child(UI.label(String(r.note).to_upper(), 8, UI.DIM, "caps"))
 	for ln in r.get("lines", []):
-		var l := para(String(ln[0]).to_upper(), _kind_col(String(ln[1])), 360)
-		l.add_theme_font_override("font", UI.font_caps)
-		v.add_child(l)
+		v.add_child(caps_line(String(ln[0]).to_upper(), _kind_col(String(ln[1])), 360))
 	var p := navy_panel(h)
 	p.name = "Settled_%d" % int(r.eid)
 	p.set_meta("result", r)

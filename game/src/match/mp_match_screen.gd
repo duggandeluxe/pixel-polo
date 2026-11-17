@@ -17,6 +17,7 @@ var stick := ShotStick.new()   # the shooting stick on the left: the only way yo
 var calls := CallStrip.new()   # DRIVE▾, your play call
 var canvas: Control
 var t := 0.0
+var break_t0 := 0.0   # t when the quarter break came up (its scoreboard's drop-in)
 var excite := 0.0
 var autoplay := false
 var bot_rng := RandomNumberGenerator.new()
@@ -138,6 +139,7 @@ func _enter_phase() -> void:
 				view.snap_to(PoolView.attack_focus(shadow.ball.pos))
 		MpMatch.Phase.BREAK:
 			sprint = null
+			break_t0 = t
 			Sfx.play("bell")
 		MpMatch.Phase.FINAL:
 			sprint = null
@@ -603,7 +605,8 @@ func _draw_hud(ci: Control, size: Vector2, p: Play) -> void:
 		v.clock = my_clock
 	elif p == shadow and shadow != null and not targets.is_empty():
 		v.clock = watch_clock
-	var board := Hud.scoreboard(ci, size.x, v, g.my_team(), g.their_team(), _cap_of(g.me), _cap_of(1 - g.me), _trim_of(1 - g.me))
+	var tier := Scoreboard.tier()
+	var board := Hud.scoreboard(ci, size.x, v, g.my_team(), g.their_team(), _cap_of(g.me), _cap_of(1 - g.me), _trim_of(1 - g.me), {}, tier)
 	menu_rect = Rect2(size.x - 24, 3, 20, 19)
 	if g.phase != MpMatch.Phase.FINAL:
 		Hud.pause_button(ci, menu_rect)
@@ -614,9 +617,9 @@ func _draw_hud(ci: Control, size: Vector2, p: Play) -> void:
 		var sc := play.shot_clock if p == play else watch_shot
 		var mu := play.man_up if p == play else watch_man_up
 		if g.kind != Play.Kind.PENALTY:
-			Hud.shot_clock(ci, Vector2(board.position.x - 34, 2), sc)
+			Scoreboard.shot_clock(ci, tier, board, minf(sc, v.clock))   # (never more than the game clock has left)
 		if mu > 0.0 and not p.over:
-			Hud.man_up(ci, size.x, mu, p == shadow)
+			Hud.man_up(ci, size.x, mu, p == shadow, Scoreboard.below(board))
 		if p == play and play.holder != null and play.holder.side == Swimmer.Side.US:
 			Hud.holder_tag(ci, Vector2(3, size.y - 15), play.holder.player)
 		if p == play:
@@ -645,16 +648,15 @@ func _draw_hud(ci: Control, size: Vector2, p: Play) -> void:
 
 func _draw_break(ci: Control, size: Vector2, v: MatchState) -> void:
 	var left := maxi(0, int(ceilf((g.until - Net.now_ms()) / 1000.0)))
-	Hud.break_card(ci, size, v.quarter, v.score, g.my_team(), g.their_team(), "BACK IN THE WATER IN %d" % left)
+	Hud.break_card(ci, size, v.quarter, v.score, g.my_team(), g.their_team(), "BACK IN THE WATER IN %d" % left, t - break_t0)
 
 func _draw_final(ci: Control, size: Vector2, v: MatchState) -> void:
 	var won := g.winner == g.me
 	var title := "YOU WIN!" if won else "DEFEAT"
-	var lines: Array = [["%s  %d - %d  %s" % [Colleges.short_name(g.my_team()).to_upper(), v.score[0], v.score[1], Colleges.short_name(g.their_team()).to_upper()], UI.GOLD]]
+	var fin := Schedule.final_text(v.score, v.shootout if v.in_shootout else [], " - ")
+	var lines: Array = [["%s  %s  %s" % [Colleges.short_name(g.my_team()).to_upper(), fin, Colleges.short_name(g.their_team()).to_upper()], UI.GOLD]]
 	if g.forfeit:
 		lines.append("%s LEFT THE MATCH" % String(g.names[1 - g.winner]))
-	if v.in_shootout:
-		lines.append("PENALTIES %d - %d" % [v.shootout[0], v.shootout[1]])
 	lines.append("SHOTS %d - %d    SAVES %d - %d" % [v.shots[0], v.shots[1], v.saves[0], v.saves[1]])
 	lines.append("EXCLUSIONS DRAWN %d - %d    STEALS %d - %d" % [v.exclusions[0], v.exclusions[1], v.steals[0], v.steals[1]])
 	var wins := ""

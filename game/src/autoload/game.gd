@@ -22,12 +22,16 @@ var settings := {
 	"dyn_ai": -1.0,            # Quick Match's DYNAMIC level, 0..1 (a career keeps its own); -1: not yet set
 	"dyn_hist": [],            # ...and the recent games it's judged on
 	"tutorials_done": [],      # tutorial parts finished (Drill.ORDER ids): the tutorial picks up after them
+	"career_tour": "",         # the first career's guided tour (CareerTour): "", "pending" or "seen"; global, never in a save
+	"career_tour_uid": "",     # ...the career it's pending for
+	"career_tutorial_seen": false,   # the gameplay tutorial a new career opens with: only the first-ever dynasty gets it
+	"hub_hint_uid": "",        # the one dynasty that gets the home screen's CLICK HERE TO VIEW YOUR DYNASTY HUB! hint (the first-ever one); "-": none left
 	"reduce_motion": false,
-	"auto_replay": true,       # goals replayed automatically, once INSTANT REPLAY is unlocked
-	"replay_style": "cinematic",   # its presentation: cinematic, or basic (from the game camera)
+	"no_reminders": false,      # DISABLE COACHING REMINDERS: no injury / new recruits / Dynasty Hub callouts on the home screen
 	"quarter_min": 2,          # QUARTER LENGTH for Quick Match (a career keeps its own: Career.quarter_min)    # no fades, pops or count-ups in the menus (see Juice)
 	"dev_mode": false,         # Developer Mode: the form lab and the roster's DEV panel (StarFx)
 	"mp_name": "", "mp_link": "online", "mp_club": 3,
+	"language": "",            # LANGUAGE (Loc): an App Store locale id the player picked; "": the phone's own
 }
 
 ## What the next match screen plays: {"us": PoloTeam, "them": PoloTeam, "seed": int}
@@ -46,6 +50,9 @@ var current_name := ""
 var history: Array = []
 var test_mode := false
 var _fade: ColorRect
+var _changing := 0        # screen changes under way (goto between its first line and the new screen in)
+var warmup: Node = null   # ScreenWarmup: every screen compiled ahead of its first visit
+const ScreenWarmup := preload("res://src/ui/screen_warmup.gd")
 
 var _default_settings := {}   # `settings` as a first install has them (RESET GAME)
 
@@ -64,6 +71,24 @@ func _ready() -> void:
 	_default_settings = settings.duplicate(true)
 	load_settings()
 
+## Going to the background (home button, a phone call, the app switcher) or being closed: iOS and
+## Android may end a backgrounded app without any further notice, so whatever the dynasty has in
+## memory is written now. Not in a match (its result is applied when it ends; the career on disk is
+## already the pre-match one, and the match pauses itself) and not mid screen change.
+const NO_FLUSH_SCREENS := ["match", "mp_match", "drill"]
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		flush_saves()
+
+func flush_saves() -> void:
+	if test_mode:
+		return
+	if career != null and slot >= 1 and _changing == 0 and not current_name in NO_FLUSH_SCREENS:
+		save_career()
+	if progress != null:
+		save_progress()
+
 func register_main(m: Node, root: Control, ov: CanvasLayer) -> void:
 	main = m
 	screen_root = root
@@ -73,6 +98,19 @@ func register_main(m: Node, root: Control, ov: CanvasLayer) -> void:
 	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(_fade)
+	warmup = ScreenWarmup.new()
+	warmup.name = "ScreenWarmup"
+	m.add_child(warmup)
+
+## Starts compiling every screen in the background (main.gd, once the title is up). Not in tests.
+func start_warmup() -> void:
+	if warmup != null and not test_mode:
+		warmup.start()
+		prepare_setup()
+
+## Is a screen change under way (its fade, or the new screen being built)?
+func is_changing_screen() -> bool:
+	return _changing > 0
 
 # ------------------------------------------------------------------ navigation
 func goto(name: String, params: Dictionary = {}, push: bool = true) -> void:
@@ -81,10 +119,15 @@ func goto(name: String, params: Dictionary = {}, push: bool = true) -> void:
 	if (name == "matchup" or (name == "match" and bool(params.get("career", false)))) and upgrade_target() != {}:
 		params = upgrade_target()
 		name = "player"
+	# the DEV screen only behind its code, however it's reached (a button, Back, a lab): DevGate
+	name = DevGate.route(name)
+	if name in AppConfig.MULTIPLAYER_SCREENS and not AppConfig.multiplayer_enabled():
+		name = "title"   # (v1.0: multiplayer is hidden in release builds)
 	if push and current_name != "" and current_name != name:
 		history.append(current_name)
 		if history.size() > 12:
 			history.pop_front()
+	_changing += 1
 	var script_path: String = SCREEN_PATHS.get(name, "res://src/ui/screens/%s.gd" % name)
 	var scr: Script = load(script_path)
 	var node: Control = scr.new()
@@ -101,8 +144,9 @@ func goto(name: String, params: Dictionary = {}, push: bool = true) -> void:
 		current_screen.queue_free()
 	current_screen = node
 	current_name = name
-	set_detail(node.get("detail") == true)
+	set_detail(node.get("detail") == true or Loc.hires())   # (LANGUAGE: scripts the pixel fonts lack, at full resolution)
 	screen_root.add_child(node)
+	_changing -= 1
 	if not test_mode:
 		var tw2 := create_tween()
 		tw2.tween_property(_fade, "color:a", 0.0, 0.15)
@@ -117,7 +161,7 @@ func set_detail(on: bool) -> void:
 	if win == null:
 		return
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if on else Window.CONTENT_SCALE_MODE_VIEWPORT
-	win.oversampling = not on
+	win.oversampling = not on or Loc.hires()   # (LANGUAGE: system-font scripts drawn sharp at the display's size)
 
 ## The mandatory upgrades' next page ({id, mandatory}), or {} when nothing is left to spend.
 func upgrade_target() -> Dictionary:
@@ -138,11 +182,25 @@ func back(default: String = "title") -> void:
 	var target := default
 	if history.size() > 0:
 		target = history.pop_back()
+	# (a DEV screen left behind in the history, its session closed: skipped, never a detour to
+	# Settings, nor back to the screen already open behind it)
+	if target == DevGate.SCREEN and not DevGate.is_open():
+		while (target == DevGate.SCREEN or target == current_name) and history.size() > 0:
+			target = history.pop_back()
+		if target == DevGate.SCREEN or target == current_name:
+			target = default
 	goto(target, {}, false)
 
 # ------------------------------------------------------------------ dialogs
-## buttons: Array of [label, Callable, style]
-func dialog(title: String, body: String, buttons: Array) -> Control:
+## buttons: Array of [label, Callable, style]. kind: the popup's colour (UI.POPUP_KINDS: info,
+## reward, danger, warn, good); left empty, a dialog with a danger button is danger, one whose title
+## warns is warn, the rest info.
+## The layer's children: [dim, centre]; the centre holds the panel, the panel the column:
+## [title plate, body, button row] (screens add rows to that column: hub, player).
+func dialog(title: String, body: String, buttons: Array, kind: String = "") -> Control:
+	if kind == "":
+		kind = dialog_kind(title, buttons)
+	var k := UI.popup_kind(kind)
 	var layer := Control.new()
 	layer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.theme = UI.theme
@@ -154,14 +212,24 @@ func dialog(title: String, body: String, buttons: Array) -> Control:
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(center)
-	var p := UI.panel(UI.PANEL, UI.GOLD)
-	p.custom_minimum_size = Vector2(280, 0)
+	var p := PanelContainer.new()
+	p.name = "Popup"
+	p.add_theme_stylebox_override("panel", UI.popup_box(kind))
+	# never wider than the screen (a phone in portrait is the narrowest): the body wraps to fit
+	var vw := get_viewport().get_visible_rect().size.x if is_inside_tree() else 480.0
+	var pw := minf(280.0, vw - 16.0)
+	p.custom_minimum_size = Vector2(pw, 0)
 	center.add_child(p)
-	var v := UI.vbox(4)
+	var v := UI.vbox(5)
 	p.add_child(v)
 	# (an amount's coin, CreditCoin.TAG, is drawn as the coin itself: number first)
-	v.add_child(CreditCoin.rich(title, 16, UI.GOLD, "big", 0.0, 20))
-	v.add_child(CreditCoin.rich(body, 8, UI.TEXT, "body", 270.0))
+	var plate := PanelContainer.new()
+	plate.name = "TitlePlate"
+	plate.add_theme_stylebox_override("panel", UI.popup_plate(kind))
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plate.add_child(CreditCoin.rich(title, 16, k.title, "big", pw - 2.0 * UI.POPUP_PAD_H - 10.0, 20))
+	v.add_child(plate)
+	v.add_child(CreditCoin.rich(body, 8, UI.TEXT, "body", pw - 2.0 * UI.POPUP_PAD_H - 2.0))
 	var bh := UI.hbox(4)
 	bh.alignment = BoxContainer.ALIGNMENT_END
 	v.add_child(bh)
@@ -181,72 +249,68 @@ func dialog(title: String, body: String, buttons: Array) -> Control:
 		create_tween().tween_property(p, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	return layer
 
-## The Road to Glory's notification (a queued "achievement": {title, count}): navy, a white
-## border, the yellow headline. `done` runs when it's closed.
+## A dialog's colour when the caller doesn't name one: red when one of its buttons is a danger
+## button, orange when its title warns, gold when it pays out, otherwise the plain info popup.
+func dialog_kind(title: String, buttons: Array) -> String:
+	for bd in buttons:
+		if bd.size() > 2 and String(bd[2]) == "danger":
+			return "danger"
+	var t := title.to_upper()
+	for w in ["WARNING", "DEADLINE", "PROBLEM", "NOT ENOUGH", "FORFEIT"]:
+		if t.contains(w):
+			return "warn"
+	for w in ["EARNED", "BONUS", "ACHIEVEMENT"]:
+		if t.contains(w):
+			return "reward"
+	return "info"
+
+## The Road to Glory's notification (a queued "achievement": {id, title, count}): the unlock show
+## (TeamUnlock: the new tier's schools break out of their padlocks one by one). `done` runs when
+## it's closed with OK.
 func achievement_dialog(q: Dictionary, done: Callable) -> Control:
-	var layer := Control.new()
-	layer.set_anchors_preset(Control.PRESET_FULL_RECT)
-	layer.theme = UI.theme
-	layer.mouse_filter = Control.MOUSE_FILTER_STOP
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.6)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(dim)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(center)
-	var p := UI.panel(Deck.NAVY, UI.BORDER)
-	p.custom_minimum_size = Vector2(240, 0)
-	center.add_child(p)
-	var v := UI.vbox(4)
-	v.alignment = BoxContainer.ALIGNMENT_CENTER
-	p.add_child(v)
-	var lines := [["ACHIEVEMENT UNLOCKED!", 20, UI.GOLD, "big"], [String(q.get("title", "")), 16, UI.TEXT, "big"],
-		["%d NEW PROGRAM%s AVAILABLE!" % [int(q.get("count", 0)), "" if int(q.get("count", 0)) == 1 else "S"], 8, UI.GOLD, "caps"]]
-	if int(q.get("count", 0)) <= 0:
-		lines.pop_back()
-	for ln in lines:
-		var l := UI.label(ln[0], ln[1], ln[2], ln[3])
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		if ln[3] == "big":
-			l.add_theme_color_override("font_outline_color", UI.INK)
-			l.add_theme_constant_override("outline_size", 2)
-		v.add_child(l)
-	var sub := UI.label("Start a new career at any of them from PICK YOUR SCHOOL.", 8, UI.DIM)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	sub.custom_minimum_size.x = 220
-	v.add_child(sub)
-	var bc := CenterContainer.new()
-	v.add_child(bc)
-	bc.add_child(UI.button("OK", func():
-		if not is_instance_valid(layer) or layer.is_queued_for_deletion():
-			return   # one close per notification, even with two taps in the same frame
-		layer.queue_free()
-		if done.is_valid():
-			done.call(), "primary", 80, 22))
-	overlay.add_child(layer)
-	Sfx.play("levelup")
-	if Juice.enabled():
-		p.pivot_offset = Vector2(p.custom_minimum_size.x / 2.0, 40)
-		p.scale = Vector2(0.9, 0.9)
-		create_tween().tween_property(p, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	return layer
+	return TeamUnlock.play(overlay, q, done)
 
 func toast(text: String, color: Color = UI.GOLD) -> void:
 	if overlay == null:
 		return
-	var p := UI.panel(Color(0.04, 0.06, 0.12, 0.92), color)
-	p.add_child(CreditCoin.rich(text, 8, color))
+	# a small notification: the popup's frame (its edge in the message's colour), no title; the
+	# message between two pixel diamonds, with a 1 px ink drop shadow. It carries UI.theme itself
+	# (the overlay is a CanvasLayer, which passes no theme down): without it the body font falls
+	# back to its imported, smoothed settings and the text comes out blotchy.
+	var p := PanelContainer.new()
+	p.name = "Toast"
+	p.theme = UI.theme
+	p.add_theme_stylebox_override("panel", UI.toast_box(color))
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var row := UI.hbox(5)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(row)
+	var msg := CreditCoin.rich(text, 8, color)
+	msg.add_theme_color_override("font_shadow_color", UI.INK)
+	msg.add_theme_constant_override("shadow_offset_x", 1)
+	msg.add_theme_constant_override("shadow_offset_y", 1)
+	for i in 3:
+		if i == 1:
+			row.add_child(msg)
+			continue
+		var pip := TextureRect.new()
+		pip.texture = UI.toast_pip(color)
+		pip.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+		pip.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(pip)
 	overlay.add_child(p)
 	await get_tree().process_frame
+	if not is_instance_valid(p):
+		return
 	var vs := get_viewport().get_visible_rect().size
-	p.position = Vector2((vs.x - p.size.x) / 2.0, -20)
+	p.position = Vector2(roundf((vs.x - p.size.x) / 2.0), -p.size.y - 6.0)
 	var tw := create_tween()
-	tw.tween_property(p, "position:y", 6.0, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(p, "position:y", 6.0, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(1.6)
-	tw.tween_property(p, "modulate:a", 0.0, 0.3)
+	tw.tween_property(p, "position:y", 2.0, 0.25).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(p, "modulate:a", 0.0, 0.25)
 	tw.tween_callback(p.queue_free)
 
 func vibrate(ms: int) -> void:
@@ -256,9 +320,17 @@ func vibrate(ms: int) -> void:
 # ------------------------------------------------------------------ persistence
 func load_settings() -> void:
 	var cf := ConfigFile.new()
-	if cf.load(SETTINGS_PATH) == OK:
+	if SafeFile.load_config(cf, SETTINGS_PATH) == OK:
 		for k in settings.keys():
 			settings[k] = cf.get_value("s", k, settings[k])
+		# from before the first career tour: a player who already has a career has had their first
+		if not cf.has_section_key("s", "career_tour") and _any_career_file():
+			settings.career_tour = CareerTour.SEEN
+		# from before the hint went global: a player who already has a career has had their first
+		if not cf.has_section_key("s", "hub_hint_uid") and _any_career_file():
+			settings.hub_hint_uid = "-"
+	if not DevGate.allowed():
+		settings.dev_mode = false   # (release build: Developer Mode can't be switched on from a settings file)
 	if float(settings.dyn_ai) < 0.0:
 		# first run after the AI overhaul: an old dynamic level that had moved comes across; otherwise MEDIUM
 		var old := float(settings.dyn_level)
@@ -268,18 +340,29 @@ func save_settings() -> void:
 	var cf := ConfigFile.new()
 	for k in settings.keys():
 		cf.set_value("s", k, settings[k])
-	cf.save(SETTINGS_PATH)
+	SafeFile.save_config(cf, SETTINGS_PATH)
 	Sfx.set_sfx_on(settings.sfx)
 	Sfx.set_music_on(settings.music)
+
+## Is there any career save on disk (a slot, or the old single save)? Read straight from the
+## folder: no migration, no loading.
+func _any_career_file() -> bool:
+	if FileAccess.file_exists(save_dir + LEGACY_SAVE_PATH):
+		return true
+	for n in range(1, SLOTS + 1):
+		if FileAccess.file_exists(slot_path(n)):
+			return true
+	return false
 
 # ------------------------------------------------------------------ RESET GAME
 ## Settings' RESET GAME: the game as it was first installed. Every career slot and its backups,
 ## the Road to Glory profile, the dynasty setup, the settings (difficulty, sound,
-## tutorial progress, Developer Mode) and the unlocks (Store.reset_all; RESTORE PURCHASES brings
-## them back) are gone, but PURCHASED COINS STAY (the store's record is written again at once);
-## the title screen comes up fresh. Returns the files it removed.
+## tutorial progress, Developer Mode), the unlocks (Store.reset_all; RESTORE PURCHASES brings
+## them back), the purchased Polo Points and the visual upgrades are all gone (the store's record
+## is written again at once); the title screen comes up fresh. Returns the files it removed.
 func reset_everything() -> Array:
 	var gone: Array = []
+	DevGate.lock()   # (the DEV screen asks for its code again)
 	career = null
 	setup = null
 	setup_seed = 0
@@ -292,7 +375,8 @@ func reset_everything() -> Array:
 		for f in dir.get_files():
 			# (the game's own files: the slots, their backups, slots.cfg, the profile, the setup,
 			# the old single save, settings and the store's record; Godot's logs and caches stay)
-			if f.ends_with(".json") or f.ends_with(".json.tmp") or f in [SLOTS_CFG, "settings.cfg", "store.cfg"]:
+			var base := f.trim_suffix(SafeFile.TMP).trim_suffix(SafeFile.PREV)
+			if base.ends_with(".json") or base in [SLOTS_CFG, "settings.cfg", "store.cfg"]:
 				if dir.remove(f) == OK:
 					gone.append(f)
 	settings = _default_settings.duplicate(true)
@@ -300,6 +384,7 @@ func reset_everything() -> Array:
 	save_settings()
 	Store.reset_all()
 	BarHit.override = BarHit.Override.NORMAL
+	Scoreboard.override = 0
 	return gone
 
 # ------------------------------------------------------------------ career saves (five slots)
@@ -322,27 +407,18 @@ func last_slot() -> int:
 	_migrate_legacy_save()
 	var cf := _slots_cfg()
 	var last := int(cf.get_value("slots", "last", 0))
-	if slot_exists(last) and not slot_hidden(last):
+	if slot_exists(last):
 		return last
-	# no record (or that one was deleted, or is hibernated): the newest file
+	# no record (or that one was deleted): the newest file
 	var best := 0
 	var best_t := -1
 	for n in range(1, SLOTS + 1):
-		if slot_exists(n) and not slot_hidden(n):
+		if slot_exists(n):
 			var t := int(cf.get_value("slots", "played_%d" % n, FileAccess.get_modified_time(slot_path(n))))
 			if t > best_t:
 				best = n
 				best_t = t
 	return best
-
-## A HIBERNATED career (Colleges.ENABLE_LOWER_DIVISIONS off): one that plays Division II or III. Its
-## file is left exactly as it is and its slot stays taken (slot_exists, first_free_slot: a new
-## career never goes into it), but it isn't listed, continued or loaded until they're back.
-func slot_hidden(n: int) -> bool:
-	if Colleges.lower_divisions or not slot_exists(n):
-		return false
-	var divs: Array = slot_summary(n).get("divs", [Colleges.D1])
-	return divs.any(func(d): return not Colleges.division_enabled(int(d)))
 
 func first_free_slot() -> int:
 	for n in range(1, SLOTS + 1):
@@ -359,7 +435,7 @@ func slot_summary(n: int) -> Dictionary:
 	var cached = cf.get_value("slots", "sum_%d" % n, {})
 	# the school's id is kept with the summary so a renamed team shows its new name; summaries
 	# cached before that are read again
-	if cached is Dictionary and int(cached.get("mtime", -1)) == mtime and cached.has("school") and cached.has("divs"):
+	if cached is Dictionary and int(cached.get("mtime", -1)) == mtime and cached.has("school"):
 		var s := Colleges.school(String(cached.school))
 		if s.is_empty():
 			return {"team": "SAVE PROBLEM", "season": 0, "record": "", "damaged": true}
@@ -372,15 +448,11 @@ func slot_summary(n: int) -> Dictionary:
 	sm.mtime = mtime
 	if not test_mode:
 		cf.set_value("slots", "sum_%d" % n, sm)
-		cf.save(save_dir + SLOTS_CFG)
+		SafeFile.save_config(cf, save_dir + SLOTS_CFG)
 	return sm
 
 static func _summary_of(c: Career) -> Dictionary:
-	# (`divs`: the divisions it plays, so a hibernated one is known without reading the file: slot_hidden)
-	var divs: Array = c.divisions.duplicate()
-	if not Colleges.division_of(c.school) in divs:
-		divs.append(Colleges.division_of(c.school))
-	return {"team": c.team().name, "school": c.school, "season": c.year - Career.START_YEAR + 1, "record": c.record_text(), "divs": divs}
+	return {"team": c.team().name, "school": c.school, "season": c.year - Career.START_YEAR + 1, "record": c.record_text()}
 
 func save_career() -> void:
 	if career == null or test_mode:
@@ -395,16 +467,11 @@ func save_career() -> void:
 			push_error("Can't back up the career save before the realignment; keeping the old file.")
 			return
 	career.realigned = false
-	var tmp := path + ".tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		push_error("Can't write the career save: %s" % error_string(FileAccess.get_open_error()))
+	# write, read back, then rename (SafeFile): a crash, a full disk or iOS ending the app mid-save
+	# never leaves a half-written career, and the save it replaces is kept as .prev
+	if not SafeFile.write_text(path, JSON.stringify(career.to_dict())):
 		return
-	f.store_string(JSON.stringify(career.to_dict()))
-	f.close()
-	# write-then-rename, so a crash mid-save never leaves a half-written career
-	if DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(path)) == OK:
-		Store.commit_career(career.uid)   # (what it bought with purchased coins is in the save now: final)
+	Store.commit_career(career.uid)   # (what it bought with purchased coins is in the save now: final)
 	var sm := _summary_of(career)
 	sm.mtime = FileAccess.get_modified_time(path)
 	_mark_played(slot, sm)
@@ -413,24 +480,26 @@ func save_career() -> void:
 func load_career(n: int = -1) -> bool:
 	if n < 0:
 		n = slot
-	if not slot_exists(n) or slot_hidden(n):
-		return false   # (hibernated: left as it is, never loaded, so never saved over)
-	var f := FileAccess.open(slot_path(n), FileAccess.READ)
-	if f == null:
+	if not slot_exists(n):
 		return false
-	var text := f.get_as_text()
-	f.close()
+	var used_prev: Array = []
+	var text := SafeFile.read_text(slot_path(n), true, used_prev)   # (damaged: its previous good copy)
+	if text == "":
+		return false
 	var d = JSON.parse_string(text)
 	if not _playable(d):
 		push_error("The career save in slot %d is damaged or at a school no longer in the game, and can't be loaded." % n)
 		return false
 	career = Career.from_dict(d)
 	slot = n
+	if not used_prev.is_empty():
+		toast("Your last save couldn't be read, so the one before it was loaded.", UI.WARN)
+		save_career()   # (the good copy becomes the slot's file again)
 	# purchased coins it spent on something this save never got (the game stopped before saving)
 	# come back: never charged without the thing bought (CoinVault.reconcile)
 	var back := Store.reconcile_career(career.uid)
 	if back > 0:
-		toast("%s returned to your purchased coins: an unfinished purchase" % CreditCoin.tag(back, true), UI.GOLD)
+		toast("%s returned to your purchased Polo Points: an unfinished purchase" % CreditCoin.tag(back, true), UI.GOLD)
 	# (a save behind the exchange's ledger: coins already exchanged don't come back)
 	if Wallet.reconcile_exchanges(career) > 0:
 		save_career()
@@ -457,17 +526,24 @@ func load_career(n: int = -1) -> bool:
 ## A new career at `school_id`. With no seed (the New Career screen): from the dynasty setup the
 ## picker showed, its players exactly as they were rated there, never made again; the setup is
 ## then used up, so the next new dynasty gets new rosters. With a seed: a setup made from it.
-func start_career(school_id: String, coach_first: String, coach_last: String, seed_value: int = -1, divs: Array = [Colleges.D1]) -> bool:
+func start_career(school_id: String, coach_first: String, coach_last: String, seed_value: int = -1) -> bool:
 	if Colleges.school(school_id).is_empty() or not progression().is_unlocked(school_id):
 		return false
 	var from := dynasty_setup() if seed_value < 0 else Career.new_setup(seed_value)
+	var had_career := _any_career_file()   # (the first career tour: only the first-ever career gets it)
 	delete_save()
-	# (only what the account owns; the store's word, checked again here)
-	career = from.begin(school_id, coach_first, coach_last, divs.filter(func(d): return Store.division_owned(int(d))))
-	career.tutorial = Career.TUTORIAL_PENDING
+	career = from.begin(school_id, coach_first, coach_last)
+	# the gameplay tutorial: the first dynasty ever made only (a player with a career already saved,
+	# from before this setting, has played; the GAME GUIDE's PLAY THE TUTORIAL is always there)
+	if not bool(settings.get("career_tutorial_seen", false)) and not had_career:
+		career.tutorial = Career.TUTORIAL_PENDING
+	if not bool(settings.get("career_tutorial_seen", false)):
+		settings["career_tutorial_seen"] = true
+		save_settings()
 	if seed_value < 0:
 		clear_setup()
 	save_career()
+	CareerTour.note_new_career(career, had_career)
 	progression().note(career, slot)   # (the season line starts again at 0 wins)
 	save_progress()
 	return true
@@ -487,19 +563,18 @@ func delete_slot(n: int) -> void:
 		var d = JSON.parse_string(FileAccess.get_file_as_string(slot_path(n)))
 		if d is Dictionary:
 			Store.reconcile_career(String(d.get("uid", "")))
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(slot_path(n)))
+		SafeFile.remove_all(slot_path(n))   # (and its .tmp / .prev: a new career never falls back onto it)
 	var cf := _slots_cfg()
 	for k in ["played_%d" % n, "sum_%d" % n]:
 		if cf.has_section_key("slots", k):
 			cf.erase_section_key("slots", k)
-	cf.save(save_dir + SLOTS_CFG)
+	SafeFile.save_config(cf, save_dir + SLOTS_CFG)
 
 func _read_slot(n: int) -> Career:
-	var f := FileAccess.open(slot_path(n), FileAccess.READ)
-	if f == null:
+	var text := SafeFile.read_text(slot_path(n))
+	if text == "":
 		return null
-	var d = JSON.parse_string(f.get_as_text())
-	f.close()
+	var d = JSON.parse_string(text)
 	if not _playable(d):
 		return null
 	return Career.from_dict(d)
@@ -511,7 +586,7 @@ static func _playable(d: Variant) -> bool:
 
 func _slots_cfg() -> ConfigFile:
 	var cf := ConfigFile.new()
-	cf.load(save_dir + SLOTS_CFG)
+	SafeFile.load_config(cf, save_dir + SLOTS_CFG)
 	return cf
 
 func _mark_played(n: int, summary: Dictionary = {}) -> void:
@@ -520,7 +595,7 @@ func _mark_played(n: int, summary: Dictionary = {}) -> void:
 	cf.set_value("slots", "played_%d" % n, int(Time.get_unix_time_from_system()))
 	if not summary.is_empty():
 		cf.set_value("slots", "sum_%d" % n, summary)
-	cf.save(save_dir + SLOTS_CFG)
+	SafeFile.save_config(cf, save_dir + SLOTS_CFG)
 
 ## path, or path_2, path_3 ... so an earlier file is never overwritten.
 func _free_path(path: String) -> String:
@@ -571,18 +646,38 @@ func _migrate_legacy_save() -> void:
 ## players (the seed is saved, and the same seed always makes the same players), so rosters
 ## can't be rerolled by reopening the picker.
 func dynasty_setup() -> Career:
+	if setup == null and _setup_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_setup_task)
+		_setup_task = -1
+		setup = _setup_made
+		_setup_made = null
 	if setup == null:
 		var seed_value := _read_setup_seed()
 		if seed_value < 0:
 			seed_value = randi()
 			_write_setup_seed(seed_value)
 		setup_seed = seed_value
-		# (all 54, so every card shows real players; begin() keeps the divisions the dynasty plays,
-		# and the thirty are the same players whichever those are)
-		setup = Career.new_setup(seed_value, [Colleges.D1, Colleges.D2, Colleges.D3])
+		setup = Career.new_setup(seed_value)
 	return setup
 
 ## The setup's used up (a career started from it): the next new dynasty gets new rosters.
+## Makes the next dynasty setup on a worker thread (~0.3 s of roster generation), so PICK YOUR
+## SCHOOL opens without making it; dynasty_setup() takes it (waiting, if it's not quite done).
+## Career.new_setup reads only its own dice and constants. Not without threads (the web build):
+## there it's made on the screen's first visit, as before.
+var _setup_task := -1
+var _setup_made: Career = null
+
+func prepare_setup() -> void:
+	if setup != null or _setup_task >= 0 or test_mode or not ScreenWarmup.threads_ok():
+		return
+	var seed_value := _read_setup_seed()
+	if seed_value < 0:
+		seed_value = randi()
+		_write_setup_seed(seed_value)
+	setup_seed = seed_value
+	_setup_task = WorkerThreadPool.add_task(func(): _setup_made = Career.new_setup(seed_value), false, "dynasty setup")
+
 func clear_setup() -> void:
 	setup = null
 	setup_seed = 0
@@ -621,7 +716,7 @@ func load_progress() -> void:
 		return
 	var path := progress_path()
 	if FileAccess.file_exists(path):
-		var d = JSON.parse_string(FileAccess.get_file_as_string(path))
+		var d = JSON.parse_string(SafeFile.read_text(path))
 		if d is Dictionary and d.has("tiers"):
 			progress = Progression.from_dict(d)
 			return
@@ -642,12 +737,4 @@ func load_progress() -> void:
 func save_progress() -> void:
 	if progress == null or test_mode:
 		return
-	var path := progress_path()
-	var tmp := path + ".tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		push_error("Can't write the progression profile: %s" % error_string(FileAccess.get_open_error()))
-		return
-	f.store_string(JSON.stringify(progress.to_dict()))
-	f.close()
-	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(path))
+	SafeFile.write_text(progress_path(), JSON.stringify(progress.to_dict()))

@@ -8,6 +8,20 @@ PANEL = np.array([11, 23, 66])
 SLIVER = 0.010     # thinner than this (relative to the logo): edge fringe, merged away
 THIN = 0.042       # thinner than this and on the outside: an outline
 RING_CONTRAST = 120
+## Logos whose small variant is their main piece alone: loose bits beside it (Malibu's spray) turn
+## to noise in a list mark.
+MAIN_ONLY = {"PPCU"}
+
+def main_piece(flat):
+    """flat with only its largest connected piece kept (8-connected), cropped to it."""
+    from scipy import ndimage
+    lab, n = ndimage.label(flat >= 0, structure=np.ones((3, 3)))
+    if n <= 1:
+        return flat
+    sizes = ndimage.sum(flat >= 0, lab, np.arange(1, n + 1))
+    f = np.where(lab == np.argmax(sizes) + 1, flat, -1)
+    ys, xs = np.nonzero(f >= 0)
+    return f[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
 
 def roles(flat, P):
     """Per colour: thickness and how much of its edge is the logo's outside edge."""

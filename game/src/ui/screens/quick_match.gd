@@ -2,6 +2,11 @@ extends BaseScreen
 ## Quick match: pick your club and an opponent (or random). Quarters are always 2:00.
 
 var teams: Array[PoloTeam] = []
+var rows: Array = []     # per club, its row's numbers [RTG, OFF stars, DEF stars], worked out once
+## The clubs made on an earlier visit and never played since (made fresh, ~8 ms a club): the two
+## that play leave it, so a club that's been in a match is never shown or handed out again.
+static var _spare: Array = []
+static var _spare_rows: Array = []
 var mine := 3
 var theirs := -1          # -1 = random
 
@@ -9,8 +14,16 @@ func _init() -> void:
 	detail = true   # (its team logos: TeamLogo's fine pixels)
 
 func _ready() -> void:
+	if _spare.size() != League.club_count():
+		_spare.resize(League.club_count())
+		_spare_rows.resize(League.club_count())
 	for i in League.club_count():
-		teams.append(League.make_team(i))
+		if _spare[i] == null:
+			var tm := League.make_team(i)
+			_spare[i] = tm
+			_spare_rows[i] = [roundi(tm.power()), PoloTeam.rating_stars(tm.offense_display()), PoloTeam.rating_stars(tm.defense_display())]
+		teams.append(_spare[i])
+		rows.append(_spare_rows[i])
 	build("QUICK MATCH")
 	_refresh()
 	Sfx.music("menu")
@@ -50,8 +63,8 @@ func _column(title: String, selected: int, allow_random: bool, pick: Callable) -
 		var lbl := UI.label(tm.name.to_upper(), 8, UI.TEXT)
 		lbl.custom_minimum_size = Vector2(96, 0)
 		r.add_child(lbl)
-		r.add_child(UI.label("RTG %d" % roundi(tm.power()), 8, UI.TEXT))
-		r.add_child(CreditCoin.rich("OFF %s  DEF %s" % [CreditCoin.STARS % PoloTeam.rating_stars(tm.offense_display()), CreditCoin.STARS % PoloTeam.rating_stars(tm.defense_display())], 8, UI.DIM))
+		r.add_child(UI.label("RTG %d" % rows[i][0], 8, UI.TEXT))
+		r.add_child(CreditCoin.rich("OFF %s  DEF %s" % [CreditCoin.STARS % rows[i][1], CreditCoin.STARS % rows[i][2]], 8, UI.DIM))
 		var ii := i
 		v.add_child(row_button(r, func():
 			pick.call(ii)
@@ -64,4 +77,6 @@ func _play() -> void:
 		var options: Array = range(teams.size()).filter(func(i): return i != mine)
 		opp = options[randi() % options.size()]
 	Game.match_cfg = {"us": teams[mine], "them": teams[opp], "seed": randi(), "minutes": float(MatchState.quarter_min_for(false))}
+	_spare[mine] = null
+	_spare[opp] = null
 	Game.goto("match", Game.match_cfg)

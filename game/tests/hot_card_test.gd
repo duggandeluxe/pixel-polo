@@ -28,11 +28,12 @@ func _counts(cur: float, red: int) -> Array:
 
 func _star_rule() -> void:
 	r.check(_counts(5.0, 0) == [5.0, 0], "a five-star, NORMAL: five gold")
-	r.check(_counts(5.0, 1) == [4.0, 1], "a five-star, HOT: four gold and one red")
-	r.check(_counts(5.0, 2) == [3.0, 2], "a five-star, VERY HOT: three gold and two red")
+	r.check(_counts(5.0, 1) == [5.0, 1], "a five-star, HOT: five gold and one red (six stars)")
+	r.check(_counts(5.0, 2) == [5.0, 2], "a five-star, VERY HOT: five gold and two red (seven stars)")
 	r.check(_counts(3.0, 1) == [3.0, 1] and _counts(3.0, 2) == [3.0, 2], "a three-star: his three gold, then one or two red")
-	r.check(_counts(4.5, 1) == [4.0, 1] and _counts(4.0, 2) == [3.0, 2], "4.5 HOT and 4 VERY HOT: the red still whole stars (no half red)")
-	r.check(_counts(3.5, 1) == [3.5, 1] and _counts(3.5, 2) == [3.0, 2], "3.5: HOT keeps the half gold; VERY HOT needs the room, three gold and two red")
+	r.check(_counts(4.5, 1) == [4.5, 1] and _counts(4.0, 2) == [4.0, 2], "4.5 HOT keeps his half star, then the red; 4 VERY HOT: four gold, then two red")
+	r.check(_counts(3.5, 1) == [3.5, 1] and _counts(3.5, 2) == [3.5, 2], "3.5: HOT and VERY HOT both keep the half gold, the red after it")
+	r.check(Deck.star_count(3.5, 3.5, 2) == 6 and Deck.star_count(4.5, 4.5, 2) == 7 and Deck.star_count(5.0, 5.0, 2) == 7 and Deck.star_count(5.0, 5.0, 1) == 6, "...the red always runs the bar long past the gold (a five-star HOT: six places)")
 	var ok := true
 	for h in range(1, 11):
 		for st in PlayerForm.LEVELS:
@@ -49,7 +50,7 @@ func _star_rule() -> void:
 		same = same and (String(line.word) != "") == (_counts(float(line.cur), PlayerForm.red_stars(String(line.state)))[1] > 0)
 	r.check(same and is_equal_approx(p.stars, 5.0), "a five-star's HOT / VERY HOT word always comes with his red stars")
 	p.heat = 0
-	r.check(StarFx.changed_places(5.0, 5.0, PlayerForm.NORMAL, PlayerForm.HOT) == [4], "a five-star going HOT: his fifth star animates gold to red")
+	r.check(StarFx.changed_places(5.0, 5.0, PlayerForm.NORMAL, PlayerForm.HOT) == [5], "a five-star going HOT: a sixth, red star appears after his five gold")
 
 func _momentum() -> void:
 	var p := PoloPlayer.new()
@@ -176,24 +177,17 @@ func _all(n: Node) -> Array:
 	return out
 
 func _tip() -> void:
+	# (the roster's old one-time PLAYERS CAN HEAT UP! dialog is gone: the HOT tutorial covers it)
 	var tree: SceneTree = r.get_tree()
 	var c := Career.new_game("BUCK", "A", "B", 29)
 	Game.career = c
-	for q: PoloPlayer in c.team().roster:
-		q.form = []
-		q.heat = 0
+	(c.team().starters()[3] as PoloPlayer).form = [1, 1]
 	Game.goto("roster")
 	await tree.process_frame
-	r.check(not c.hot_tip and not Game.current_screen.hot_tip(), "nobody heating up: no tip")
-	(c.team().starters()[3] as PoloPlayer).form = [1, 1]
-	r.check(Game.current_screen.hot_tip() and c.hot_tip, "the first time one of yours heats up: PLAYERS CAN HEAT UP!")
-	r.check(not Game.current_screen.hot_tip(), "...and never again")
+	r.check(not Game.current_screen.has_method("hot_tip"), "no HOT tip on the roster any more")
+	r.check(Game.overlay.get_children().filter(func(n): return n != Game.get("_fade") and n is Control and (n as Control).mouse_filter == Control.MOUSE_FILTER_STOP).is_empty(),
+		"one of yours heating up: nothing pops over the roster")
 	_close_dialogs()
-	var saved := JSON.stringify(c.to_dict())
-	r.check(saved.contains("\"hot_tip\":true") and Career.from_dict(JSON.parse_string(saved)).hot_tip, "seen is saved with the career")
-	var old: Dictionary = JSON.parse_string(saved)
-	old.erase("hot_tip")
-	r.check(not Career.from_dict(old).hot_tip, "an older save hasn't seen it (it shows once)")
 	Game.goto("hub")
 
 func _close_dialogs() -> void:

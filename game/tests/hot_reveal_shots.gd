@@ -52,6 +52,10 @@ static func run(runner: Node, out: String) -> void:
 	scr.reveal.t = float(scr.reveal.plan[0].steps[0].at) + 0.5
 	scr.reveal.layout()
 	await _shot(runner, out, "hr_summary_reveal")
+	scr.reveal.set_process(true)
+	scr.reveal.skip()
+	await tree.create_timer(2.0).timeout
+	await _shot(runner, out, "hr_summary_points")
 	Game.career = null
 	Game.goto("title")
 

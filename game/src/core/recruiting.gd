@@ -55,27 +55,41 @@ const DEV_PROFILES := {
 }
 
 # ------------------------------------------------------------------ the price
-## PRICE = clamp(round(BASE + ATTRIBUTES + POTENTIAL + POSITION), 8, 99), with S his current
-## stars, A the sum of his four attributes and U the room to his four ceilings:
-##   BASE = PRICE_ZERO + PRICE_LIN x (S - 1.5) + PRICE_SQ x (S - 1.5)^2
+## PRICE = clamp(round(BASE + ATTRIBUTES + POTENTIAL + POSITION), PRICE_MIN, PRICE_MAX), then the
+## high-POTENTIAL premium (pot_premium: 4.5-star +2%, 5 +4%, rounded up), then never past
+## ORDINARY_MAX, with S his current stars, A the sum of his four attributes and U the room to his
+## four ceilings, P his POTENTIAL stars and W = PRICE_CUR_W x S + (1 - PRICE_CUR_W) x max(P, S):
+##   BASE = PRICE_ZERO + PRICE_LIN x (W - 1.5) + PRICE_SQ x (W - 1.5)^2
 ##   ATTRIBUTES = round(PRICE_ATTR x A), POTENTIAL = round(PRICE_POT x U)
-## The spec's formula is 8 + 3(S - 1.5) + 5(S - 1.5)^2; its intercept and square were tuned (it
-## allows that) so the prices land in the target ranges by stars: with 8 there a 1.5-star cost
-## 15-20 and a 2-star 19-24, over their 8-14 and 12-19 (--test credit_economy prints the spread).
-const PRICE_ZERO := 2.0
+## The Potential-Led Pricing: the curve runs on W, 80% potential, so a capped-out 3-star costs
+## about what any 3-star-potential does (~25), while a 2-star with 4.5-star potential is ~55-60.
+## Current attributes count for little (0.15 a point); room to grow adds 0.4 a point. Curve 5 + 3(W - 1.5) + 5.5(W - 1.5)^2.
+## (Before it, the Recruiting Price Rebalance: 5 + 5(S - 1.5) + 8(S - 1.5)^2, 0.50 an attribute point, 0.80 a
+## point of room, 10-110 PP (it was 2 + 3(S - 1.5) + 6(S - 1.5)^2, 0.4, 0.65, 8-80). Targets by
+## stars: 1.5 10-18, 2 15-25, 2.5 20-35, 3 35-50, 3.5 50-70, 4 70-90, 4.5 90-110 (--test
+## credit_economy prints the spread, against the old formula's).)
+const PRICE_ZERO := 5.0
 const PRICE_LIN := 3.0
-const PRICE_SQ := 6.0
-const PRICE_ATTR := 0.4
-const PRICE_POT := 0.65
-const PRICE_MIN := 8
-const PRICE_MAX := 99
+const PRICE_SQ := 5.5
+const PRICE_ATTR := 0.15
+const PRICE_POT := 0.4
+const PRICE_CUR_W := 0.2   # how much CURRENT stars count in the curve's W (the rest is POTENTIAL)
+const PRICE_MIN := 10
+const PRICE_MAX := 110
+## The most an ordinary prospect ever costs, after everything (the formula, its premium, a save):
+## 110. A DEV Recruit's fixed DevRecruits.PRICE is past it and never held to it.
+const ORDINARY_MAX := 110
 const POS_PRICE := {PoloPlayer.Pos.GK: 3, PoloPlayer.Pos.CENTER: 2, PoloPlayer.Pos.DEFENDER: 2,
 	PoloPlayer.Pos.UTILITY: 1, PoloPlayer.Pos.DRIVER: 0, PoloPlayer.Pos.WING: 0}
 
-## His price from what he is now: stars, attributes, room to grow, position. Set once, when he's
-## made (new_recruit), and saved with him: it never moves while he's on the market.
+## His price from what he is now: stars, attributes, room to grow, position, never past
+## ORDINARY_MAX. Set once, when he's made (new_recruit), and saved with him: it never moves while
+## he's on the market (and a saved price is never recalculated: from_save).
 static func price_of(p: PoloPlayer) -> int:
-	var s := p.stars - 1.5
+	if p.dev_recruit != "":
+		return DevRecruits.PRICE   # (a DEV Recruit's price is fixed: no formula, no ORDINARY_MAX)
+	# potential-led: the curve runs on a blend that's mostly POTENTIAL, barely current stars
+	var s := (PRICE_CUR_W * p.stars + (1.0 - PRICE_CUR_W) * maxf(p.pot_stars, p.stars)) - 1.5
 	var base := PRICE_ZERO + PRICE_LIN * s + PRICE_SQ * s * s
 	var a := 0.0
 	var u := 0.0
@@ -83,16 +97,34 @@ static func price_of(p: PoloPlayer) -> int:
 		a += Attributes.value(p, k)
 		u += maxf(0.0, Attributes.ceiling(p, k) - Attributes.value(p, k))
 	var total := base + roundi(PRICE_ATTR * a) + roundi(PRICE_POT * u) + int(POS_PRICE.get(p.pos, 0))
-	return clampi(roundi(total), PRICE_MIN, PRICE_MAX)
+	return mini(pot_premium(clampi(roundi(total), PRICE_MIN, PRICE_MAX), p.pot_stars), ORDINARY_MAX)
+
+## The high-POTENTIAL premium, on top of the price above: 4.5-star potential +2%, 5 +4% (4 and below none),
+## rounded UP to the next whole coin (in per-mille integers, so 25 x 1.04 is 26, never 27).
+## price_of holds the result to ORDINARY_MAX (110) afterwards.
+const POT_PREMIUM := [[5.0, 1040], [4.5, 1020]]   # [POTENTIAL at least, per mille]
+
+static func pot_premium(price: int, pot: float) -> int:
+	var ps := PlayerForm.snap_half(pot)
+	for step in POT_PREMIUM:
+		if ps >= float(step[0]):
+			return (price * int(step[1]) + 999) / 1000
+	return price
 
 # ------------------------------------------------------------------ the market
 ## A new market: MARKET_SIZE prospects, replacing whatever was on it but the pinned (`keep_pins`
-## false: a new recruiting class, the pins gone too).
-static func new_market(c: Career, keep_pins: bool = true) -> void:
+## false: a new recruiting class, the pins gone too). `roll`: a real refresh (the season's market,
+## REFRESH RECRUITS), where each DEV Recruit has his own 1 in DevRecruits.ODDS of taking an
+## ordinary prospect's place (never when a save is converted). An unsigned DEV Recruit who isn't
+## kept (unpinned, or a new class) is ROTATED OUT: his one roll for a CPU program
+## (DevRecruits.rotate_out).
+static func new_market(c: Career, keep_pins: bool = true, roll: bool = false) -> void:
 	var used := {}
 	for r in c.incoming:
 		used[(r.p as PoloPlayer).last] = true
-	var out: Array = c.market.filter(func(r): return bool(r.get("pin", false))) if keep_pins else []
+	# (a DEV Recruit stays through a refresh only pinned, as anyone: one player, never remade)
+	var out: Array = c.market.filter(func(r): return is_pinned(r)) if keep_pins else []
+	var gone: Array = c.market.filter(func(r): return not r in out and (r.p as PoloPlayer).dev_recruit != "")
 	for r in out:
 		used[(r.p as PoloPlayer).last] = true
 	while out.size() < MARKET_SIZE:
@@ -100,12 +132,43 @@ static func new_market(c: Career, keep_pins: bool = true) -> void:
 		used[(r.p as PoloPlayer).last] = true
 		out.append(r)
 	c.market = out
+	for r in gone:
+		DevRecruits.rotate_out(c, r)   # (each once: he's off the market now)
+	if roll:
+		DevRecruits.roll(c)
 
 ## A new recruiting season (Career.start_season): a fresh market (last class's pins expire with
 ## it), the free refresh back.
 static func start_season(c: Career) -> void:
 	c.refreshes = 0
-	new_market(c, false)
+	c.auto_games = 0
+	new_market(c, false, true)
+
+## THE FREE POST-GAME ROLL: every AUTO_EVERY of your games, the market's unpinned prospects are
+## replaced for nothing, as a REFRESH RECRUITS would (DEV Recruit roll and rotation included),
+## but it isn't one of the season's refreshes: the next REFRESH's price stays where it was. It
+## raises NEW RECRUITS AVAILABLE (Career.new_recruits) until the Recruiting screen is opened
+## (seen_new). Never while the market is closed (roster cuts). Returns whether it rolled.
+const AUTO_EVERY := 2
+
+static func after_game(c: Career) -> bool:
+	if c.phase == "cuts":
+		return false
+	c.auto_games += 1
+	if c.auto_games < AUTO_EVERY:
+		return false
+	c.auto_games = 0
+	new_market(c, true, true)
+	c.new_recruits = true
+	c.recruits_popped = false
+	return true
+
+## The Recruiting screen opened: NEW RECRUITS AVAILABLE is read. Returns whether it was unread.
+static func seen_new(c: Career) -> bool:
+	if not c.new_recruits:
+		return false
+	c.new_recruits = false
+	return true
 
 ## One market prospect: his stars (STAR_ODDS), a growth class for his POTENTIAL (GROWTH, or a
 ## sleeper's five), his four attributes and ceilings built to them (CollegeGen), and his price.
@@ -150,22 +213,29 @@ static func refresh(c: Career) -> String:
 		return block
 	var cost := refresh_cost(c)
 	if cost > 0 and not c.spend_credits(cost, "MARKET REFRESH"):
-		return "Not enough credits."
+		return "Not enough Polo Points."
 	c.refreshes += 1
-	new_market(c)
+	new_market(c, true, true)
 	return ""
 
 # ------------------------------------------------------------------ pins
 static func pinned(c: Career) -> Array:
-	return c.market.filter(func(r): return bool(r.get("pin", false)))
+	return c.market.filter(func(r): return is_pinned(r))
 
+## Pinned: his record says so (a DEV Recruit too, like anyone).
 static func is_pinned(r: Dictionary) -> bool:
-	return bool(r.get("pin", false))
+	return bool(r.get("pin", false)) and can_pin(r)
+
+## Anyone on the market can be pinned (DEV Recruits too, since the DEV Recruit Overhaul).
+static func can_pin(r: Dictionary) -> bool:
+	return r.get("p") is PoloPlayer
 
 ## PIN / UNPIN a market prospect. Returns "" or why not. Costs nothing, signs nobody.
 static func toggle_pin(c: Career, r: Dictionary) -> String:
 	if not r in c.market:
 		return "He's no longer on the market."
+	if not can_pin(r):
+		return "He can't be pinned."
 	if is_pinned(r):
 		r.erase("pin")
 		return ""
@@ -202,7 +272,7 @@ static func deadline_text(d: Dictionary) -> String:
 		var p: PoloPlayer = r.p
 		lines.append("   %s  %s  %s" % [p.last.to_upper(), p.pos_text(), CreditCoin.tag(int(r.price))])
 	lines.append("SIGNING SLOTS REMAINING: %d" % int(d.slots))
-	lines.append("CREDITS: %s" % CreditCoin.tag(int(d.credits)))
+	lines.append("POLO POINTS: %s" % CreditCoin.tag(int(d.credits)))
 	lines.append("PROJECTED ROSTER: %d / %d%s" % [int(d.projected), int(d.cap), ("  (%d MUST BE CUT)" % int(d.over)) if int(d.over) > 0 else ""])
 	for g in d.need:
 		lines.append("%s - NEED" % g)
@@ -237,10 +307,11 @@ static func sign(c: Career, r: Dictionary) -> String:
 	if block != "":
 		return block
 	if not c.spend_credits(int(r.price), "RECRUIT"):
-		return "Not enough credits."
+		return "Not enough Polo Points."
 	c.market.erase(r)
 	c.incoming.append(r)
 	var p: PoloPlayer = r.p
+	DevRecruits.on_signed(c, p)
 	c.add_news("SIGNED: %s (%s, %s*) joins next season" % [p.short_name(), p.pos_text(), PlayerForm.star_text(p.stars)])
 	return ""
 
@@ -322,7 +393,9 @@ static func from_save(list: Array) -> Array:
 		if not d is Dictionary or not d.has("p") or not d.has("price"):
 			continue
 		var p := PoloPlayer.from_dict(d.p)
-		var r := {"p": p, "price": clampi(int(d.price), 0, PRICE_MAX), "legacy": bool(d.get("legacy", false))}
+		var r := {"p": p, "price": clampi(int(d.price), 0, ORDINARY_MAX), "legacy": bool(d.get("legacy", false))}
+		if p.dev_recruit != "" and not bool(r.legacy):
+			r.price = DevRecruits.PRICE   # (fixed, whatever the save says: an older save's 70, 95 or 125 is 200 now)
 		if bool(d.get("pin", false)):
 			r["pin"] = true
 		out.append(r)

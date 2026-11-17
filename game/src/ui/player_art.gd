@@ -41,10 +41,11 @@ static func draw_ours(ci: CanvasItem, bottom: Vector2, p: PoloPlayer, team: Polo
 
 ## How he looks: {hair (colour), hairdo, face, nose (0-2), brow (0, 1 heavy), build (0-2)}.
 ## Always the same for the same player, from his id (his name for a quick-match player), so he
-## looks the same all career long; nothing here is saved.
+## looks the same all career long; nothing here is saved. A DEV Recruit (DevRecruits) from who he
+## is instead: one permanent look in every dynasty, his previews (an id of their own) included.
 static func looks(p: PoloPlayer) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(["looks", p.id if p.id != 0 else hash(p.first + " " + p.last)])
+	rng.seed = hash(["looks", "dev", p.dev_recruit]) if p.dev_recruit != "" else hash(["looks", p.id if p.id != 0 else hash(p.first + " " + p.last)])
 	var n: int = HAIR_BY_SKIN[clampi(p.skin, 0, HAIR_BY_SKIN.size() - 1)]
 	return {"hair": Color(HAIR[rng.randi_range(0, n - 1)]), "hairdo": HAIRDOS[rng.randi_range(0, HAIRDOS.size() - 1)],
 		"face": FACES[rng.randi_range(0, FACES.size() - 1)], "nose": rng.randi_range(0, 2),

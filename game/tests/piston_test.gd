@@ -113,13 +113,13 @@ func _one_arm() -> void:
 	for i in range(1, 21):
 		a_worst = maxi(a_worst, _arms_up(func(px): PoolArt._raised_arm(px, i / 20.0, skin)))
 	r.check(a_worst == 1, "TEST A: the piston's block: one arm, the other down (most up at once: %d)" % a_worst)
-	# C: the keeper's untouched: set, both hands up; a lunge, his arm out and the other up
+	# C: the keeper's own arms: set, treading water with both hands under; a lunge, his arm out and the other up
 	var k := Swimmer.new(AttrBench.player({}, false, {}, PoloPlayer.Pos.GK), Swimmer.Side.THEM, true)
 	k.dive = 0.0
 	var set_arms := _arms_up(func(px): PoolArt._keeper_arms(px, k, skin))
 	k.dive = 0.8
 	var lunge := _arms_up(func(px): PoolArt._keeper_arms(px, k, skin))
-	r.check(set_arms == 2 and lunge == 2, "TEST C: goalkeepers keep their own arms (set: %d up, lunging: %d)" % [set_arms, lunge])
+	r.check(set_arms == 0 and lunge == 2, "TEST C: goalkeepers keep their own arms (set: %d up, lunging: %d)" % [set_arms, lunge])
 	# B in play: PRESS, M-DROP and 5 DROP possessions with shots; every block drawn is one arm,
 	# and nobody outside the pistons ever has the piston's arm up
 	var bad := {"two": 0, "piston_arm": 0, "blocks": 0, "frames": 0}
@@ -787,7 +787,8 @@ static func shots(runner, dir: String) -> void:
 			elif b.active() and b.t > 0.25 and not shot.word:
 				shot.word = true
 				await save.call("fx_%s_word" % c[0])
-	Game.goto("settings")
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings")
 	await runner.get_tree().process_frame
 	await runner.get_tree().process_frame
 	await save.call("settings_dev")

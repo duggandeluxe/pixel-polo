@@ -3,10 +3,10 @@ class_name CreditRewards
 ## pay credits. Nothing else does: no gate, no awards, no records, no events, no PRO bonus.
 ## (Bought credits, the store's packs, are the Vault's: not earned, and untouched here.)
 ##
-##   a REGULAR-SEASON game (game_lines): a win +3; and for a win the best ranking bonus that
+##   a game, REGULAR SEASON OR PLAYOFF (game_lines): a win +3; and for a win the best ranking bonus that
 ##   applies, never more than one (the No. 1 team +8, else a Top 5 team +5, else a team ranked
 ##   above you +3, all from the poll out before the game); won by 5+ goals +2; a shutout +3.
-##   A loss pays nothing. Playoff games pay through the achievements instead.
+##   A loss pays nothing. A playoff win pays the +3 only (no bonuses), plus the achievements.
 ##   ACHIEVEMENTS (season_lines), once a season each, the moment they're reached.
 ##   THE NEW SEASON: +15 as it starts (season_start), the first season of a career too.
 ##
@@ -35,15 +35,12 @@ const ACHIEVEMENTS := [
 	["nat_semi", 8, "REACHED NCSA SEMIFINALS"],
 	["nat_final", 8, "REACHED NCSA FINAL"],
 	["nat_champ", 23, "NATIONAL CHAMPIONS"],
-	["d3_bid", 8, "NCSA DIVISION III BID"],
-	["d3_final", 8, "REACHED DIVISION III FINAL"],
-	["d3_champ", 23, "DIVISION III NATIONAL CHAMPIONS"],
 ]
 
 ## What game `g` (yours, finished, in round `r`) earns: [[label, credits], ...], before anything
 ## is paid. `ranks` is the poll before the game (id -> 1..30). Changes nothing.
 static func game_lines(c: Career, g: Dictionary, r: Dictionary, ranks: Dictionary) -> Array:
-	if g.r == null or Schedule.is_playoff(r) or Schedule.winner(g) != c.school:
+	if g.r == null or Schedule.winner(g) != c.school:
 		return []
 	var home: bool = g.h == c.school
 	var opp: String = g.a if home else g.h
@@ -52,6 +49,8 @@ static func game_lines(c: Career, g: Dictionary, r: Dictionary, ranks: Dictionar
 	var theirs := int(s[1] if home else s[0])
 	var so: Array = g.r.get("so", [])
 	var out: Array = [["WIN", WIN]]
+	if Schedule.is_playoff(r):
+		return out   # (the postseason: the win alone, no bonuses)
 	var me_rank := int(ranks.get(c.school, 0))
 	var opp_rank := int(ranks.get(opp, 0))
 	if opp_rank == 1:
@@ -101,9 +100,6 @@ static func season_lines(c: Career) -> Array:
 		"nat_semi": c._reached("nat_sf"),
 		"nat_final": c._reached("nat_final"),
 		"nat_champ": _won_round(c, "nat_final"),
-		"d3_bid": c.school in c.season.get("d3_seeds", []),
-		"d3_final": c.school in [Schedule.d3_game(c.schedule, "d3_final").get("h", ""), Schedule.d3_game(c.schedule, "d3_final").get("a", "")],
-		"d3_champ": Schedule.d3_game(c.schedule, "d3_final").get("r") != null and Schedule.winner(Schedule.d3_game(c.schedule, "d3_final")) == c.school,
 	}
 	for a in ACHIEVEMENTS:
 		if bool(reached[a[0]]) and claim(c, String(a[0])):

@@ -99,10 +99,10 @@ func _board() -> void:
 	r.check(again[0] == "TOO MANY EXCLUSIONS COMMITTED.", "T7: a new true note goes first the next game (%s)" % str(again))
 	# the screen
 	c.last_summary = sm
-	Game.goto("postgame_review")
+	Game.goto("player_development")
 	await _frames(3)
 	var scr = Game.current_screen
-	r.check(Game.current_name == "postgame_review" and scr.find_child("Board", true, false) != null and scr.find_child("Continue", true, false) != null, "T45: the board, and CONTINUE")
+	r.check(Game.current_name == "player_development" and scr.find_child("Sheet", true, false) != null and scr.find_child("Continue", true, false) != null, "T45: the bulletin board, and CONTINUE")
 	r.check(c.pending_event.is_empty(), "T34: no event while the board is up")
 	var log0 := c.event_log.size()
 	scr._continue()
@@ -301,7 +301,7 @@ static func shots(runner, out: String) -> void:
 		Game.career = cc
 		var sm := cc.finish_my_game(t._box(cc, [1, 1, 1, 2, 3, 3, 4, 5], 6, {"misses": 6, "assists": [2, 2, 4], "steals": [3, 3, 5], "blocks": [3], "turnovers": 4, "excl": 2, "saves": 11}))
 		cc.last_summary = sm
-		Game.goto("postgame_review")
+		Game.goto("player_development")
 		await tree.create_timer(0.6).timeout
 		runner.get_viewport().get_texture().get_image().save_png(out.path_join("p01_board_%dx%d.png" % [sz.x, sz.y]))
 		cc.pending_event = {"id": "keeper_confidence", "pid": cc.team().starters()[0].id, "pids": cc.team().starters().map(func(p): return p.id), "field": [], "story": 0,
@@ -319,7 +319,7 @@ static func shots(runner, out: String) -> void:
 	cs.queue.clear()
 	Game.career = cs
 	cs.last_summary = cs.sim_my_game()
-	Game.goto("postgame_review")
+	Game.goto("player_development")
 	await tree.create_timer(0.6).timeout
 	runner.get_viewport().get_texture().get_image().save_png(out.path_join("p04_board_simmed.png"))
 	DisplayServer.window_set_size(Vector2i(1440, 810))

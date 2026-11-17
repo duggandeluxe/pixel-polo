@@ -30,16 +30,21 @@ func run(runner) -> void:
 	Store.pro = true
 	Store.all_teams = true
 	Store.vault = 900
+	Store.bank.credited.append("txn-before-reset")
+	Store.looks.unlocked["scoreboard"] = 3
+	Store.looks.equipped["scoreboard"] = 3
+	Store.looks.celebs = [1]
 	Store.caps_owned = ["gold"]
 	var before := DirAccess.get_files_at(DIR)
 	r.check(before.size() >= 3, "a device with saves on it %s" % str(before))
 	# the button and its two confirmations
-	Game.goto("settings")
+	DevGate.try_unlock("8008")   # (RESET EVERYTHING is on the DEV screen, behind its code)
+	Game.goto("dev_settings")
 	await r.get_tree().process_frame
 	await r.get_tree().process_frame
 	var scr = Game.current_screen
 	var b: Button = scr.find_child("ResetGame", true, false)
-	r.check(b != null and b.text == "RESET EVERYTHING", "Settings has RESET EVERYTHING")
+	r.check(Game.current_name == "dev_settings" and b != null and b.text == "RESET EVERYTHING", "the DEV screen has RESET EVERYTHING")
 	b.pressed.emit()
 	await r.get_tree().process_frame
 	r.check(DirAccess.get_files_at(DIR).size() == before.size() and Store.pro, "the first dialog deletes nothing")
@@ -53,10 +58,15 @@ func run(runner) -> void:
 	await r.get_tree().create_timer(0.5).timeout   # (outside test mode the screens fade)
 	var left := Array(DirAccess.get_files_at(DIR)).filter(func(f): return f.ends_with(".json") or f == Game.SLOTS_CFG)
 	r.check(left.is_empty(), "every career, backup, slot list and the Road to Glory profile deleted %s" % str(left))
+	r.check(not DevGate.is_open() and Game.current_name == "title", "after a reset the DEV screen asks for its code again")
 	r.check(Game.career == null and Game.slot == 0 and Game.setup == null and Game.progression().unlocked.size() == 5, "a fresh profile: the bottom five open")
 	r.check(Game.settings.difficulty == "normal" and Game.settings.music == true and (Game.settings.tutorials_done as Array).is_empty() and float(Game.settings.dyn_ai) == Difficulty.DYN_START, "settings back to their defaults")
 	r.check(not Store.pro and not Store.all_teams and Store.caps_owned.is_empty() and Store.hold_owned, "PRO, ALL 30 TEAMS and caps gone")
-	r.check(Store.vault == 900, "purchased coins stay (the Universal Coin Wallet update): %d" % Store.vault)
+	r.check(Store.vault == 0, "purchased Polo Points removed: %d" % Store.vault)
+	r.check(Store.looks.level("scoreboard") == 1 and Store.looks.worn("scoreboard") == 1 and Store.looks.celebs.is_empty(), "visual upgrades removed")
+	r.check(Store.seen("txn-before-reset"), "already-credited transactions are still remembered")
+	Store._on_purchased("blue_100", "txn-before-reset")
+	r.check(Store.vault == 0, "a re-announced pack doesn't pay its coins again")
 	Store._on_owned(Store.TEAMS_ID)
 	Store._on_purchased(Store.PRO_ID)
 	r.check(not Store.all_teams and not Store.pro, "the store's startup sync doesn't bring them back")

@@ -1,6 +1,6 @@
 class_name HalftimePanel
 extends RefCounted
-## The halftime break's MID-GAME ADJUSTMENT. Under the END OF 2ND QUARTER card, a yellow button
+## The halftime break's MID-GAME ADJUSTMENT. Under the HALFTIME card, a yellow button
 ## opens it (only at halftime, only until you've decided: MatchFlow.can_adjust). Left: the four
 ## drops, the one you're on highlighted, the pick's description and CONFIRM ADJUSTMENT. Right:
 ## their first half (MatchFlow.half_stats, frozen at the end of Q2). Nothing changes until you
@@ -27,7 +27,7 @@ func draw_button(ci: CanvasItem, size: Vector2, card: Rect2, flow: MatchFlow) ->
 	button = Rect2(roundf((size.x - BTN.x) / 2.0), card.end.y + 6.0, BTN.x, BTN.y)
 	if flow.can_adjust():
 		var lit := int(Time.get_ticks_msec() / 400) % 2 == 0
-		Deck.frame(ci, button, UI.GOLD.lightened(0.1) if lit else UI.GOLD, UI.BORDER)
+		Deck.frame(ci, button, UI.GOLD.lightened(0.1) if lit else UI.GOLD, UI.BORDER, false, UI.BEVEL_RAISED)
 		Deck.ctext(ci, button, "MID-GAME ADJUSTMENT", 8, UI.INK)
 	elif flow.adjusted:
 		Deck.frame(ci, button, Deck.NAVY, Color(1, 1, 1, 0.45))
@@ -65,7 +65,7 @@ func draw(ci: CanvasItem, size: Vector2, flow: MatchFlow) -> void:
 
 # ------------------------------------------------------------------ left: the decision
 func _left(ci: CanvasItem, r: Rect2, flow: MatchFlow) -> void:
-	Deck.frame(ci, r, Deck.NAVY, UI.BORDER)
+	Deck.frame(ci, r, Deck.NAVY, UI.BORDER, false, UI.BEVEL_SOFT)
 	var x := r.position.x + 8.0
 	var iw := r.size.x - 16.0
 	var y := r.position.y + 13.0
@@ -80,7 +80,7 @@ func _left(ci: CanvasItem, r: Rect2, flow: MatchFlow) -> void:
 		var b := Rect2(x + (i % 2) * (bw + 6.0), y + floorf(i / 2.0) * (DROP_H + 5.0), bw, DROP_H)
 		drops.append(b)
 		var on := f == pick
-		Deck.frame(ci, b, UI.GOLD if on else Deck.NAVY_HEAD, UI.BORDER)
+		Deck.frame(ci, b, UI.GOLD if on else Deck.NAVY_HEAD, UI.BORDER, false, UI.BEVEL_DOUBLE if on else UI.BEVEL_RAISED)
 		Deck.ctext(ci, b, DefenseFormation.NAMES[f], 8, UI.INK if on else UI.TEXT)
 	y += DROP_H * 2.0 + 12.0
 	for line in wrap_text(String(DefenseFormation.DROP_TEXT.get(pick, "")), iw):
@@ -88,7 +88,7 @@ func _left(ci: CanvasItem, r: Rect2, flow: MatchFlow) -> void:
 		y += 10.0
 	confirm = Rect2(x, r.end.y - 8.0 - CONFIRM_H, iw, CONFIRM_H)
 	Deck.text(ci, x, confirm.position.y - 9.0, "2ND HALF: %s" % DefenseFormation.NAMES[pick], 8, UI.GOLD)
-	Deck.frame(ci, confirm, UI.GOLD, UI.BORDER)
+	Deck.frame(ci, confirm, UI.GOLD, UI.BORDER, false, UI.BEVEL_RAISED)
 	Deck.ctext(ci, confirm, "CONFIRM ADJUSTMENT", 16, UI.INK, "big")
 
 ## "HALFTIME  BRONX 7 - 5 ERIE" in `w` px: the longest of these that fits, so the score always
@@ -105,7 +105,7 @@ static func score_line(us: PoloTeam, them: PoloTeam, sc: Array, w: float) -> Str
 
 # ------------------------------------------------------------------ right: their first half
 func _right(ci: CanvasItem, r: Rect2, flow: MatchFlow) -> void:
-	Deck.frame(ci, r, Deck.NAVY, UI.BORDER)
+	Deck.frame(ci, r, Deck.NAVY, UI.BORDER, false, UI.BEVEL_SOFT)
 	var x := r.position.x + 8.0
 	var iw := r.size.x - 16.0
 	var y := r.position.y + 13.0
@@ -136,10 +136,11 @@ static func title(ci: CanvasItem, x: float, y: float, t: String, w: float) -> vo
 
 ## `text` in lines no wider than `w` (the body font at 8).
 static func wrap_text(text: String, w: float) -> Array:
+	text = Loc.t(text)   # (the player's LANGUAGE: translated whole, then wrapped)
 	var out: Array = []
 	var line := ""
-	for word in text.split(" "):
-		var trial := word if line == "" else line + " " + word
+	for word: String in Loc.units(text):
+		var trial := word if line == "" else line + Loc.gap() + word
 		if UI.text_width(trial, 8) > w and line != "":
 			out.append(line)
 			line = word

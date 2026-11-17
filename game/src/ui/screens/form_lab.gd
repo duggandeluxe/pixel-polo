@@ -36,7 +36,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 ## Moves his form and plays the change (nothing to play if it's the same form).
 func set_form(to: String) -> void:

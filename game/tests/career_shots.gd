@@ -23,6 +23,7 @@ static func run(runner: Node, out: String) -> void:
 	Game.goto("recruiting", {"tab": "MARKET", "sel": (r.p as PoloPlayer).id})
 	await tree.create_timer(0.4).timeout
 	await _shot(runner, out, "c_recruiting_scouted")
+	for q in c.upgrades_due(): Development.ai_spend(q)   # (or the hub opens the upgrade instead)
 	for s in ["hub", "more", "roster", "training", "facilities", "recruiting", "schedule", "top20", "store", "visual_shop", "records"]:
 		Game.goto(s)
 		await tree.create_timer(0.4).timeout
@@ -90,16 +91,7 @@ static func run(runner: Node, out: String) -> void:
 		Game.current_screen._confirm()
 		Game.current_screen._leave()
 		await tree.create_timer(0.4).timeout
-	# an event card in the hub
-	c.queue = [{"type": "card", "id": "center_touches", "pid": c.team().starters()[1].id}]
 	for q in Game.career.upgrades_due(): Development.ai_spend(q)   # (XP 2.0: upgrades are spent before the hub moves on)
-	Game.goto("hub")
-	await tree.create_timer(0.6).timeout
-	await _shot(runner, out, "c_card")
-	for ch in Game.overlay.get_children():
-		if ch is Control and ch.mouse_filter == Control.MOUSE_FILTER_STOP:
-			ch.queue_free()
-	c.queue.clear()
 	# fast-forward to the end of the season for the review
 	await tree.process_frame
 	var label := c.season_label()

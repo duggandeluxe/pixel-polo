@@ -229,8 +229,10 @@ static func momentum(p: PoloPlayer) -> Dictionary:
 		return clampf(float(run - hold + 1) / float(at - hold + 1), 0.0, 1.0)
 	match lv:
 		0:
+			# (shut out by the HOT SLOTS cap: his run is there, a spot isn't; he has to outplay one)
 			return {"status": "HEATING UP" if run > 0 else "NEUTRAL", "stars": 0, "bar": clampf(float(run) / HOT_AT, 0.0, 1.0),
-				"bar_label": "HOT STAR PROGRESS", "next": "1ST HOT STAR", "cooling": false}
+				"bar_label": "HOT STAR PROGRESS", "next": "OUTPLAY A HOT TEAMMATE" if shut_out(p) and run >= HOT_AT else "1ST HOT STAR",
+				"cooling": false}
 		1:
 			if run < HOT_AT:
 				return {"status": "COOLING DOWN", "stars": 1, "bar": keep.call(HOT_HOLD, HOT_AT),
@@ -392,8 +394,13 @@ const LINE_KEEPER := ["sv", "ga"]
 ## Grades `t`'s seven after a game and moves their form. `lines`: {id: stat line} (raw_points);
 ## `exp`: expected() made before the game. Returns one row a player, keeper first:
 ## {p, raw, exp, pm, grade, before, after, eff_before, eff_after}.
+## Then the HOT SLOTS cap (limit_hot) settles who may actually heat up, before "after" is read.
+## A row also carries "bumped_by" (the player who took his HOT spot) or "capped" (his run earned a
+## red star but there was no spot he could win) when that happened to him.
 static func grade_team(t: PoloTeam, lines: Dictionary, exp: Dictionary) -> Array:
+	trim_hot(t)
 	var out: Array = []
+	var bonus_before := {}
 	for p: PoloPlayer in t.starters():
 		var line: Dictionary = lines.get(p.id, {"gk": p.is_keeper()})
 		var raw := snappedf(raw_points(line), 0.01)
@@ -402,10 +409,126 @@ static func grade_team(t: PoloTeam, lines: Dictionary, exp: Dictionary) -> Array
 		var grade := grade_of(pm)
 		var before := p.form_state()
 		var eff_before := p.eff_stars()
+		bonus_before[p.id] = p.heat_bonus
 		push_grade(p, grade)
 		p.last_game = {"raw": raw, "exp": want, "pm": pm, "gr": grade, "was": before}
 		for k in LINE_KEEPER if p.is_keeper() else LINE_FIELD:
 			p.last_game[k] = int(line.get(k, 0))
-		out.append({"p": p, "raw": raw, "exp": want, "pm": pm, "grade": grade, "before": before, "after": p.form_state(),
-			"eff_before": eff_before, "eff_after": p.eff_stars()})
+		out.append({"p": p, "raw": raw, "exp": want, "pm": pm, "grade": grade, "before": before,
+			"eff_before": eff_before})
+	limit_hot(t, out, bonus_before)
+	for row in out:
+		var p: PoloPlayer = row.p
+		row["after"] = p.form_state()
+		row["eff_after"] = p.eff_stars()
 	return out
+
+# ------------------------------------------------------------------ HOT SLOTS
+## No team has more than HOT_SLOTS players with red stars at once (HOT and VERY HOT alike count
+## one each), yours and the CPU's. The run of grades and any HOT STAR PROGRESS (form, heat_bonus)
+## keep building for everyone; only the red stars themselves (heat) are limited. A slot frees
+## when a hot player cools off, leaves the roster or is outplayed for it.
+const HOT_SLOTS := 3
+
+static func hot_count(t: PoloTeam) -> int:
+	return t.roster.filter(func(q: PoloPlayer): return q.heat > 0).size()
+
+## The game just graded (`rows`, grade_team's, each with "before" and "pm") pushed some NORMAL
+## players up to HOT. Each heat that rose stands only if there's room:
+##   1. those heating up go in order of this game's PM (best first; ties by RAW), and take any
+##      free slots;
+##   2. once the team is full, one must beat a hot teammate who played this same game, by
+##      strictly more PM: the lowest-PM 1-star HOT player if there is any 1-star player on the
+##      team at all (a VERY HOT one is never at risk while one is), else the lowest-PM VERY HOT;
+##   3. whoever loses his spot goes back to NORMAL (his grades and progress stay his), and can't
+##      lose a second one this update; nobody who got a spot this update can lose it to a later,
+##      lower-scoring one;
+##   4. one who doesn't get a spot stays NORMAL, his progress as it was before the game (the
+##      coaching boost push_grade spent on the rise is given back).
+## A player already HOT moving up to VERY HOT, or down, takes no new slot. Returns the changes,
+## [{"in": PoloPlayer, "out": PoloPlayer or null}], with nobody "in" for a player shut out.
+static func limit_hot(t: PoloTeam, rows: Array, bonus_before: Dictionary = {}) -> Array:
+	var played := {}
+	var entrants: Array = []
+	for row in rows:
+		var p: PoloPlayer = row.p
+		played[p.id] = row
+		if p.heat > 0 and level_of(String(row.before)) == 0:
+			entrants.append(row)
+	if entrants.is_empty():
+		return []
+	var rising := {}
+	for row in entrants:
+		rising[(row.p as PoloPlayer).id] = true
+	var held := t.roster.filter(func(q: PoloPlayer): return q.heat > 0 and not rising.has(q.id))
+	if held.size() + entrants.size() <= HOT_SLOTS:
+		return []
+	entrants.sort_custom(func(a, b):
+		return float(a.pm) > float(b.pm) if not is_equal_approx(float(a.pm), float(b.pm)) else float(a.raw) > float(b.raw))
+	var free := maxi(0, HOT_SLOTS - held.size())
+	var fresh := {}       # got a spot this update: safe from the rest of it
+	var replaced := {}    # lost one this update: can't lose another
+	var out: Array = []
+	for row in entrants:
+		var p: PoloPlayer = row.p
+		if free > 0:
+			free -= 1
+			fresh[p.id] = true
+			held.append(p)
+			continue
+		var victim := _weakest_hot(held, played, fresh, replaced)
+		# (PM is snapped to 0.01, so equal games compare exactly equal: a tie never takes a spot)
+		if victim != null and float(row.pm) > float((played[victim.id] as Dictionary).pm):
+			victim.heat = 0
+			victim.last_game["bump"] = 1.0
+			replaced[victim.id] = true
+			held.erase(victim)
+			held.append(p)
+			fresh[p.id] = true
+			(played[victim.id] as Dictionary)["bumped_by"] = p
+			row["bumped"] = victim
+			out.append({"in": p, "out": victim})
+			continue
+		# shut out: back to NORMAL, nothing of his progress lost
+		p.heat = 0
+		p.heat_bonus = float(bonus_before.get(p.id, p.heat_bonus))
+		p.last_game["cap"] = 1.0
+		row["capped"] = true
+		out.append({"in": null, "out": null, "capped": p})
+	return out
+
+## The hot player an incoming one has to beat: among `held` (the team's hot players now), the
+## 1-star ones if there are any, else the VERY HOT; of those, only who played this game (`played`,
+## by id) and isn't protected (`fresh`) or already replaced, the lowest PM of the game. Null: none.
+static func _weakest_hot(held: Array, played: Dictionary, fresh: Dictionary, replaced: Dictionary) -> PoloPlayer:
+	var ones := held.filter(func(q: PoloPlayer): return q.heat == 1)
+	var pool := ones if not ones.is_empty() else held.filter(func(q: PoloPlayer): return q.heat >= 2)
+	var best: PoloPlayer = null
+	var best_pm := INF
+	for q: PoloPlayer in pool:
+		if not played.has(q.id) or fresh.has(q.id) or replaced.has(q.id):
+			continue
+		var pm := float((played[q.id] as Dictionary).pm)
+		if pm < best_pm:
+			best_pm = pm
+			best = q
+	return best
+
+## A team over the cap (a save from before it): the HOT_SLOTS hottest keep their red stars
+## (VERY HOT first, then the better last game), the rest go back to NORMAL, their grades kept.
+## True if anyone changed.
+static func trim_hot(t: PoloTeam) -> bool:
+	var hot := t.roster.filter(func(q: PoloPlayer): return q.heat > 0)
+	if hot.size() <= HOT_SLOTS:
+		return false
+	hot.sort_custom(func(a: PoloPlayer, b: PoloPlayer):
+		if a.heat != b.heat:
+			return a.heat > b.heat
+		return float(a.last_game.get("pm", 0.0)) > float(b.last_game.get("pm", 0.0)))
+	for i in range(HOT_SLOTS, hot.size()):
+		(hot[i] as PoloPlayer).heat = 0
+	return true
+
+## His run says HOT but the team's spots were full and he didn't outplay anyone for one.
+static func shut_out(p: PoloPlayer) -> bool:
+	return p.heat == 0 and float(p.last_game.get("cap", 0.0)) > 0.0

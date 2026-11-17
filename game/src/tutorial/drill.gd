@@ -21,7 +21,7 @@ const BRIEFS := {"frontcourt": ["Tap a teammate", "to pass him the ball."],
 	"keeper": ["When he shoots, tap the top,", "middle or bottom of your goal."]}
 
 var id := ""
-var level := 0.25          # the difficulty the drill is played at (Difficulty: between EASY and MEDIUM)
+var level := Difficulty.BASELINE   # the difficulty the drill is played at (EASY: the game as first tuned)
 var passing := true        # a tap passes
 var shooting := false      # the shooting stick shoots
 var complete := false

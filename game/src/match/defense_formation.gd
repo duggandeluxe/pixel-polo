@@ -36,6 +36,13 @@ class_name DefenseFormation
 ##   HELP     5 DROP: off his own man onto A5 with the ball
 ##   RECOVER  swimming back to his assignment (a helper, a piston going back in)
 ##   PRESSURE a piston going out to his man with the ball, slowly, one arm going up (Press)
+##   SAG      off his man (still his) towards the centre, goal side: 5 DROP's perimeter, the piston
+##            who's out (4-5 DROP: a second man in, beside the centre on his man's side)
+##
+## The wings: M-DROP and 3-4 DROP (and PRESS) keep both wings pressed (presses_wings): a wing
+## with the ball is played tight (wing_pressure), and off the ball his man denies him, a hand in
+## the lane between him and the ball (wing_deny, deny_spot), never sagging off to help. 5 DROP and
+## 4-5 DROP don't: their wings do what the formation gives them (sag, piston), like everybody else.
 ##
 ## Piston pressure (4-5, 3-4 only): the piston whose man has the ball comes out of the middle to
 ## him at a controlled swim (press_share of his full speed), and after his reaction (arm_delay)
@@ -50,8 +57,8 @@ class_name DefenseFormation
 enum F { PRESS, M_DROP, FIVE_DROP, FOUR_FIVE, THREE_FOUR }
 const NAMES := ["PRESS", "M-DROP", "5 DROP", "4-5 DROP", "3-4 DROP"]
 const COUNT := 5
-enum Duty { NONE, MARK, CLOSE, SPLIT, DROP, CRASH, BEHIND, HELP, RECOVER, PRESSURE }
-const DUTY_NAMES := ["NONE", "MARK", "CLOSE", "SPLIT", "DROP", "CRASH", "BEHIND", "HELP", "RECOVER", "PRESSURE"]
+enum Duty { NONE, MARK, CLOSE, SPLIT, DROP, CRASH, BEHIND, HELP, RECOVER, PRESSURE, SAG }
+const DUTY_NAMES := ["NONE", "MARK", "CLOSE", "SPLIT", "DROP", "CRASH", "BEHIND", "HELP", "RECOVER", "PRESSURE", "SAG"]
 enum Press { HOLD, APPROACH, RAISE, BLOCK, FOUL, RETURN }
 const PRESS_NAMES := ["HOLD", "APPROACH", "RAISE", "BLOCK", "FOUL", "RETURN"]
 
@@ -81,7 +88,7 @@ const ADVANCE_NEAR := 3.0      # ...never in closer than this to the goal
 const FOUL_SETTLE := 1.1
 const FOUL_RATE := 0.8
 const FOUL_DECAY := 2.0
-## WING PRESSURE (PRESS and M-DROP, wing_pressure): a wing with the ball is played tight by his own
+## WING PRESSURE (PRESS, M-DROP and 3-4 DROP, wing_pressure): a wing with the ball is played tight by his own
 ## man (PlayAI: WING_GAP goal side of him, WING_SWIM_GAP while he swims it, a smaller positioning
 ## mistake), so a closely guarded wing is in contact; held contact is whistled sooner (WING_SETTLE)
 ## and more often (WING_FOUL_MULT). Still only from real contact (contact_defender), still his
@@ -92,6 +99,17 @@ const WING_SWIM_GAP := 1.0
 const WING_ERR := 0.3
 const WING_SETTLE := 1.1
 const WING_FOUL_MULT := 0.7
+## WING DENIAL (M-DROP, 3-4 DROP: wing_deny): off the ball, the wing's own man sits WING_DENY_UP
+## up the lane from him towards the ball (so a pass to him goes through his reach, TIP_REACH, at
+## the end of its flight where it can still be got at) and WING_DENY_SIDE goal side of that lane
+## (not fronting him: a man round the back still has to swim it). How far up the lane is his read
+## of it (Difficulty lane_deny over WING_DENY_LANE_REF, within WING_DENY_K). The ball on its way to
+## him (within WING_DENY_CATCH): goal side of him, WING_GAP off, to contest the catch.
+const WING_DENY_UP := 0.95
+const WING_DENY_SIDE := 0.35
+const WING_DENY_LANE_REF := 0.45
+const WING_DENY_K := Vector2(0.6, 1.2)
+const WING_DENY_CATCH := 1.5
 ## M-DROP's splitters: SPLIT_SAG goal side of the line between their two men (so a pass between
 ## them goes past his reach), shaded up to SPLIT_SHADE towards the more dangerous one and
 ## SPLIT_BALL towards the one nearer the ball; with his partner closing out on A3 he covers his
@@ -145,6 +163,20 @@ const RECOVERED_R := 1.2
 ## sags PISTON_SAG of the way from his man towards the centre while his man doesn't have the ball.
 const PISTON_COMMIT := 0.35
 const PISTON_SAG := 0.55
+## 4-5 DROP is a double drop: the piston who's out isn't half way, he's in too, beside the centre
+## on his own man's side (DOUBLE_SIDE from the centre, DOUBLE_SAG of the way there from his man),
+## between the centre and his man, and never within DOUBLE_SEP of the man fronting the centre.
+const DOUBLE_SIDE := 1.6
+const DOUBLE_SAG := 0.95
+const DOUBLE_SEP := 1.3
+## 5 DROP's perimeter (D1-D4, nobody helping or recovering, his man without the ball and no pass
+## on its way to him) sags in: FIVE_SAG of the way from goal side of his man to the front of the
+## centre but never more than FIVE_SAG_MAX in off that spot (still within a closeout of his man,
+## inside OPEN_FROM: he isn't left open, A5 is the one the 5 DROP gives up), less FIVE_HOLD of it
+## for the dangerous ones (danger: the look and his Shooting).
+const FIVE_SAG := 0.45
+const FIVE_HOLD := 0.35
+const FIVE_SAG_MAX := 1.3
 ## Piston pressure: going out he swims PRESS_SHARE of his full speed (+PRESS_SHARE_PER_POINT a
 ## Defense point over 5, within PRESS_SHARE_RANGE: never a sprint), at a spot PRESS_AIM in front of
 ## the man. His arm starts up ARM_DELAY after he sets off (less ARM_DELAY_PER_POINT a Defense point
@@ -202,7 +234,7 @@ static func defense(p: PoloPlayer) -> float:
 static func hot_capped(d: PoloPlayer, comm: float) -> float:
 	if d == null or d.is_keeper():
 		return clampf(5.0 + comm, 0.0, Attributes.MAX)
-	return clampf(defense(d) - Attributes.hot_bonus(d) + comm, 0.0, Attributes.MAX) + Attributes.hot_bonus(d)
+	return clampf(defense(d) - Attributes.hot_bonus(d) + comm, 0.0, Attributes.cap(d)) + Attributes.hot_bonus(d)
 
 static func passing(p: PoloPlayer) -> float:
 	if p == null or p.is_keeper():
@@ -224,10 +256,36 @@ static func active(p: Play) -> bool:
 	return not p.over and not p.breakout and not p.carry and p.counter_t <= 0.0 and p.man_up <= 0.0 \
 		and p.kind != Play.Kind.PENALTY and not p.shootout and p.defenders.size() == 6 and p.attackers.size() == 6
 
-## The wing pressure applies: `a`, a wing ("1" or "5"), against PRESS or M-DROP, the set defence on.
+## The formations that keep both wings pressed: everything but 5 DROP and 4-5 DROP.
+static func presses_wings(f: int) -> bool:
+	return f in [F.PRESS, F.M_DROP, F.THREE_FOUR]
+
+## The wing pressure applies: `a`, a wing ("1" or "5"), against PRESS, M-DROP or 3-4 DROP, the set
+## defence on.
 static var wing_boost := true   # (off: the old perimeter defence, for measuring the difference: tests, the lab)
 static func wing_pressure(p: Play, a: Swimmer) -> bool:
-	return wing_boost and a != null and a.tag in ["1", "5"] and p.formation in [F.PRESS, F.M_DROP] and active(p)
+	return wing_boost and a != null and a.tag in ["1", "5"] and presses_wings(p.formation) and active(p)
+
+## `d` denies his wing `m` the ball (M-DROP, 3-4 DROP: the drop goes on inside, the wings stay
+## pressed): he's on him, man to man, and `m` hasn't got it. (PRESS's far side is already man to
+## man, a hand in the lane: PlayAI.PRESS_LANE.)
+static func wing_deny(p: Play, d: Swimmer, m: Swimmer) -> bool:
+	return wing_boost and m != null and d != null and m.tag in ["1", "5"] and d.mark == m and d.duty == Duty.MARK \
+		and d.fspot == Vector2.INF and p.formation in [F.M_DROP, F.THREE_FOUR] and m != _ball_man(p) and active(p)
+
+## Where `m`'s man denies him: up the lane towards the ball, goal side of it (WING DENIAL). `lane`:
+## the defence's read of the lane (Difficulty lane_deny).
+static func deny_spot(p: Play, m: Swimmer, lane: float) -> Vector2:
+	var goal := Geo.goal_center()
+	var b := ball_focus(p)
+	if b.distance_to(m.pos) < WING_DENY_CATCH:
+		return Geo.clamp_in_pool(m.pos + (goal - m.pos).normalized() * WING_GAP)   # it's coming to him
+	var along := (b - m.pos).normalized()
+	var side := along.orthogonal()
+	if side.dot(goal - m.pos) < 0.0:
+		side = -side
+	var k := clampf(lane / WING_DENY_LANE_REF, WING_DENY_K.x, WING_DENY_K.y)
+	return Geo.clamp_in_pool(m.pos + along * WING_DENY_UP * k + side * WING_DENY_SIDE)
 
 ## A formation that puts a man in front of the centre (and his guard behind him).
 static func drops(f: int) -> bool:
@@ -253,10 +311,10 @@ const DEFAULT_DROP := F.M_DROP     # a new career's, and an older save's
 ## What each drop is for, in words (Coaching and the halftime adjustment). Words only: the
 ## formations themselves are the code above, unchanged by any of this.
 const DROP_TEXT := {
-	F.M_DROP: "D3 collapses onto the center while the remaining perimeter defenders split to protect shooting lanes.",
-	F.FOUR_FIVE: "A defender drops from the 4-5 side to provide additional center protection while the remaining defenders maintain perimeter coverage.",
-	F.FIVE_DROP: "The defender in the 5 position drops toward the center to provide additional defensive support.",
-	F.THREE_FOUR: "A defender drops from the 3-4 side to provide additional center protection while the remaining defenders adjust their positioning.",
+	F.M_DROP: "D3 collapses onto the center, D2 and D4 split the shooting lanes and both wings stay pressed hard.",
+	F.FOUR_FIVE: "D4 and D5 both collapse: one fronts the center, the other helps beside him, while the rest hold the perimeter.",
+	F.FIVE_DROP: "D5 fronts the center and the whole perimeter sags in to protect it, staying closer to the best shooters.",
+	F.THREE_FOUR: "A defender drops from the 3-4 side to protect the center while both wings stay pressed hard.",
 }
 
 static func is_drop(f: int) -> bool:
@@ -459,6 +517,29 @@ static func _five_drop(p: Play, a: Dictionary, d: Dictionary, h: Swimmer, dt: fl
 			p.f_recover = null
 		else:
 			_assign(r, Duty.RECOVER, own)
+	# the rest of the perimeter collapses in round the dropper; the man whose man has it (or has
+	# it coming to him) stays on him, the normal marking
+	var c: Swimmer = a["C"]
+	var front := drop_spot(p, c)
+	for n in ["1", "2", "3", "4"]:
+		var t := slot(p, n)
+		var s: Swimmer = d.get(t)
+		var m: Swimmer = a.get(t)
+		if s == null or m == null or s.out or s == p.f_helper or s == p.f_recover or m == h or _ball_to(p, m):
+			continue
+		_assign(s, Duty.SAG, m, sag_spot(m, front))
+
+## A 5 DROP perimeter man's spot off `m`: goal side of him, FIVE_SAG of the way in to `front`, less
+## for a dangerous man (FIVE_HOLD).
+static func sag_spot(m: Swimmer, front: Vector2) -> Vector2:
+	var man := m.pos + (Geo.goal_center() - m.pos).normalized() * 1.1
+	var inward := front - man
+	var sag := minf(inward.length() * FIVE_SAG, FIVE_SAG_MAX) * (1.0 - FIVE_HOLD * clampf(danger(m), 0.0, 1.0))
+	return Geo.clamp_in_pool(man + inward.limit_length(sag))
+
+## A pass is on its way to `m`.
+static func _ball_to(p: Play, m: Swimmer) -> bool:
+	return p.ball.state == Ball.State.PASS and p.ball.receiver == m
 
 ## 5 DROP: does D4 jump A5 (`a5`, with the ball) this look? Null: not this time, and A5 keeps his look.
 static func pick_helper(p: Play, a5: Swimmer) -> Swimmer:
@@ -485,9 +566,24 @@ static func _piston(p: Play, a: Dictionary, d: Dictionary, h: Swimmer) -> void:
 		var s: Swimmer = d[t]
 		var m: Swimmer = a[t]
 		if s != dr and h != m:
-			# out, but his man hasn't got it: off him, inside, ready to go either way
-			var man := m.pos + (Geo.goal_center() - m.pos).normalized() * 1.1
-			_assign(s, Duty.MARK, m, man.lerp(drop_spot(p, c), PISTON_SAG))
+			# out, but his man hasn't got it: off him, inside, ready to go either way (4-5: in too)
+			_assign(s, Duty.SAG, m, out_spot(p, m, c))
+
+## The piston who's out, his man without the ball: 3-4 DROP, PISTON_SAG of the way from goal side
+## of his man to the front of the centre; 4-5 DROP, the double drop's second man, beside the centre
+## on his man's side, clear of the one fronting him.
+static func out_spot(p: Play, m: Swimmer, c: Swimmer) -> Vector2:
+	var man := m.pos + (Geo.goal_center() - m.pos).normalized() * 1.1
+	if p.formation != F.FOUR_FIVE:
+		return man.lerp(drop_spot(p, c), PISTON_SAG)
+	var front := drop_spot(p, c)
+	var out := man - c.pos
+	var side := c.pos + (out.normalized() if out.length() > 0.3 else Vector2.UP) * DOUBLE_SIDE
+	var spot := man.lerp(side, DOUBLE_SAG)
+	if spot.distance_to(front) < DOUBLE_SEP:
+		var away := spot - front
+		spot = front + (away.normalized() if away.length() > 0.05 else out.normalized()) * DOUBLE_SEP
+	return Geo.clamp_in_pool(spot)
 
 # ------------------------------------------------------------------ piston pressure
 ## How fast he goes out: a share of his full speed (Swimmer.boost, on top of his pace).
@@ -508,11 +604,10 @@ static func pressing(s: Swimmer) -> bool:
 ## inside his man (as _piston gives it him), whatever the formation's made of it since he went out.
 static func piston_home(p: Play, s: Swimmer, m: Swimmer) -> Vector2:
 	var c := by_tag(p.attackers, "C")
-	var spot := drop_spot(p, c) if c != null else Geo.goal_center()
-	if s == p.f_in or m == null:
+	var spot := dropper_spot(p, s, c) if c != null else Geo.goal_center()
+	if s == p.f_in or m == null or c == null:
 		return spot
-	var man := m.pos + (Geo.goal_center() - m.pos).normalized() * 1.1
-	return man.lerp(spot, PISTON_SAG)
+	return out_spot(p, m, c)
 
 ## The man he's pressing still has it (or it's his shot, still in the air).
 static func _still_on(p: Play, m: Swimmer) -> bool:
@@ -620,7 +715,7 @@ static func piston_contact(p: Play) -> bool:
 ## The dropper's duty this frame: in front of the centre (DROP, or RECOVER while he's still on
 ## his way there), going onto the centre once he has the ball and the dropper's seen it (CRASH).
 static func _dropper(p: Play, dr: Swimmer, c: Swimmer, h: Swimmer) -> void:
-	var spot := drop_spot(p, c)
+	var spot := dropper_spot(p, dr, c)
 	if h == c and p.f_crash_t >= crash_react(dr):
 		_assign(dr, Duty.CRASH, null, c.pos)
 		return
@@ -631,6 +726,22 @@ static func drop_spot(p: Play, c: Swimmer) -> Vector2:
 	var b := ball_focus(p)
 	var dir := (b - c.pos).normalized() if b.distance_to(c.pos) > 0.3 else Vector2.LEFT
 	return Geo.clamp_in_pool(c.pos + dir * DROP_FRONT)
+
+## Where this formation's dropper `dr` sits: in front of the centre on the ball's line (drop_spot).
+## 3-4 DROP's dropped piston comes from one side of the centre and stays on it: the ball over on
+## the far side, he fronts the centre straight out (towards the point, the centre's axis), never
+## swimming round to the other side of him.
+static func dropper_spot(p: Play, dr: Swimmer, c: Swimmer) -> Vector2:
+	var spot := drop_spot(p, c)
+	if p.formation != F.THREE_FOUR or dr == null or c == null:
+		return spot
+	var m := by_tag(p.attackers, dr.dtag)
+	if m == null:
+		return spot
+	var side := signf(m.home.y - c.home.y)   # his man's side of the centre (0: the point, on the axis)
+	if side != 0.0 and signf(spot.y - c.pos.y) == -side:
+		return Geo.clamp_in_pool(Vector2(c.pos.x - DROP_FRONT, c.pos.y))   # straight out, no further
+	return spot
 
 ## How long the dropper takes to see the centre has it and go (his Defense: quicker).
 static func crash_react(dr: Swimmer) -> float:
@@ -682,7 +793,7 @@ static func entry_covered(p: Play, c: Swimmer) -> bool:
 	var dr := p.f_dropper
 	if not active(p) or dr == null or dr.out or c == null:
 		return false
-	var eta := maxf(0.0, dr.pos.distance_to(drop_spot(p, c)) - DROP_SET_R) / maxf(0.1, dr.top_speed * 1.2 * move_mult(dr.player))
+	var eta := maxf(0.0, dr.pos.distance_to(dropper_spot(p, dr, c)) - DROP_SET_R) / maxf(0.1, dr.top_speed * 1.2 * move_mult(dr.player))
 	return eta < ENTRY_ETA
 
 static func is_dropper(p: Play, d: Swimmer) -> bool:

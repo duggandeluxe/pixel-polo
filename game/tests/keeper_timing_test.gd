@@ -49,8 +49,8 @@ func _tag() -> void:
 	r.check(not body.contains("OVR") and not body.contains("ovr_text") and not body.contains("rating10"), "the tag shows no OVR number")
 	var five := _gk(8.5)
 	var t := Hud.tag_parts(five)
-	r.check(String(t.text).contains("#1") and String(t.text).to_upper().contains("FARRELL") and String(t.text).contains("GK"),
-		"name, number and position kept (%s)" % t.text)
+	r.check(String(t.text).contains("#1") and String(t.text).to_upper().contains("FARRELL") and String(t.pos) == "GK"
+		and float(t.pos_x) > float(t.stars_x), "name, number, then stars, then position (%s ... %s)" % [t.text, t.pos])
 	r.check(is_equal_approx(float(t.stars), 5.0) and int(t.red) == 0, "five stars, gold (%.1f)" % float(t.stars))
 	var fills := Deck.star_fills(t.stars, t.stars, t.red)
 	r.check(fills.all(func(f): return is_equal_approx(float(f.gold), 1.0)), "...five full gold stars")
@@ -70,15 +70,15 @@ func _tag() -> void:
 				gold += 1
 			elif float(f.form) >= 0.99 and Color(f.form_col) == PlayerForm.FIRE_RED:
 				red += 1
-		r.check(int(tt.red) == PlayerForm.red_stars(hot.form_state()) and gold == 5 - heat and red == heat,
+		r.check(int(tt.red) == PlayerForm.red_stars(hot.form_state()) and gold == 5 and red == heat,
 			"%s: %d gold + %d red, as on his roster card" % [hot.form_state(), gold, red])
 		r.check(is_equal_approx(hot.stars, five.stars) and is_equal_approx(hot.pot_stars, five.pot_stars), "...his CURRENT and POTENTIAL untouched")
 	five.trait_id = "wall"
 	var tw := Hud.tag_parts(five)
-	r.check(String(tw.trait) != "" and float(tw.trait_x) >= float(tw.stars_x) + Deck.star_bar_w_for(five.stars, five.stars) + 4.0, "the trait still follows, clear of the stars")
-	# (the Roster Restoration stars are 9 px: the tag is its text, the star bar and the trait, no more)
-	var parts_w := UI.text_width(String(tw.text), 8, "caps") + Deck.star_bar_w_for(five.stars, five.stars) + 16.0 + UI.text_width(String(tw.trait), 8, "caps") + 6.0
-	r.check(float(tw.size.x) <= parts_w + 2.0 and float(tw.size.y) == 12.0, "compact: text, stars and trait only (%.0f px vs %.0f)" % [float(tw.size.x), parts_w])
+	r.check(not tw.has("trait") and float(tw.pos_x) >= float(tw.stars_x) + Deck.star_bar_w_for(five.stars, five.stars) + 4.0, "no trait; the position follows, clear of the stars")
+	# (the Roster Restoration stars are 9 px: the tag is its name, the star bar and the position, no more)
+	var parts_w := UI.text_width(String(tw.text), 8, "caps") + Deck.star_bar_w_for(five.stars, five.stars) + 16.0 + UI.text_width(String(tw.pos), 8, "caps") + 4.0
+	r.check(float(tw.size.x) <= parts_w + 2.0 and float(tw.size.y) == 12.0, "compact: name, stars and position only (%.0f px vs %.0f)" % [float(tw.size.x), parts_w])
 
 # ------------------------------------------------------------------ the dive
 func _keeper(attrs: Dictionary) -> PoloPlayer:

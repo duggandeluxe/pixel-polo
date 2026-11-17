@@ -10,7 +10,7 @@ extends BaseScreen
 ## roster_cuts). Your credits are in the header's chip.
 
 const RosterScreen := preload("res://src/ui/screens/roster.gd")
-const TABS := ["MARKET", "PINNED", "INCOMING"]
+const TABS := ["MARKET", "INCOMING"]
 const COLS := 4
 const GAP := 8
 const ROW_GAP := 6
@@ -25,6 +25,8 @@ var cards := {}             # pid -> his card
 func setup(params: Dictionary) -> void:
 	if params.has("tab"):
 		tab = String(params.tab)
+	if not tab in TABS:
+		tab = "MARKET"
 	if params.has("sel"):
 		sel = int(params.sel)
 	from = String(params.get("from", "hub"))   # Coaching opens it too: back goes back there
@@ -32,6 +34,8 @@ func setup(params: Dictionary) -> void:
 func _ready() -> void:
 	back_target = from
 	build("RECRUITING MARKET", true, true)
+	if c != null and Recruiting.seen_new(c):
+		Game.save_career()   # (NEW RECRUITS AVAILABLE read: the hub's banner and dot go, for good)
 	_render()
 
 func _render() -> void:
@@ -42,14 +46,12 @@ func _render() -> void:
 	body.add_theme_constant_override("separation", 4)
 	body.add_child(_top())
 	body.add_child(_projection())
-	var rows: Array = c.market if tab == "MARKET" else (Recruiting.pinned(c) if tab == "PINNED" else c.incoming)
+	var rows: Array = c.market if tab == "MARKET" else c.incoming
 	var center := CenterContainer.new()
 	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if rows.is_empty():
 		var empty := "No recruits signed yet: they join next season." if tab == "INCOMING" else \
 			("The market reopens with the new season." if c.phase == "cuts" else "The market is empty: refresh it.")
-		if tab == "PINNED":
-			empty = "No pinned recruits. Open a prospect and PIN him to keep him through refreshes."
 		center.add_child(UI.label(empty, 8, UI.DIM))
 	else:
 		var grid := GridContainer.new()
@@ -76,9 +78,7 @@ func _top() -> Control:
 	for t in TABS:
 		var tt: String = t
 		var n := ""
-		if tt == "PINNED":
-			n = "  %d" % Recruiting.pinned(c).size()
-		elif tt == "INCOMING":
+		if tt == "INCOMING":
 			n = "  %d" % c.incoming.size()
 		var b := Deck.button(tt + n, func():
 			tab = tt
@@ -121,13 +121,13 @@ func _projection() -> Control:
 	head.name = "ProjectedCount"
 	h.add_child(head)
 	h.add_child(UI.label("GRADUATING: %d" % Recruiting.graduating(c).size(), 8, UI.ACCENT, "caps"))
-	h.add_child(UI.label("SIGNED: %d / %d" % [c.incoming.size(), Recruiting.SIGN_MAX], 8, UI.ACCENT, "caps"))
+	# (SIGNED is the gold chip above; the note stays short so the strip fits the 480 px page)
 	h.add_child(UI.spacer(0, 0, true))
 	var msg := "NO CUTS REQUIRED"
 	if over > 0:
-		msg = "%d PLAYER%s MUST BE CUT AFTER THE SEASON" % [over, "" if over == 1 else "S"]
+		msg = "MUST CUT %d AFTER SEASON" % over
 	elif keepers_over > 0:
-		msg = "%d GOALKEEPER%s MUST BE CUT (MAX %d)" % [keepers_over, "" if keepers_over == 1 else "S", c.keeper_cap(c.school)]
+		msg = "MUST CUT %d GK (MAX %d)" % [keepers_over, c.keeper_cap(c.school)]
 	var ml := UI.label(msg, 8, UI.WARN if bad else UI.GOOD, "caps")
 	ml.name = "ProjectionNote"
 	h.add_child(ml)
@@ -135,8 +135,8 @@ func _projection() -> Control:
 
 # ------------------------------------------------------------------ the cards
 ## A recruit's athlete card: his position (top left; a small pin when he's pinned), his portrait
-## big (Portrait, twice its pixels, cut at the shoulders), his surname, his CURRENT stars (his
-## potential stays on his profile), and a footer with his price (the number, then the coin) or,
+## big (Portrait, twice its pixels, cut at the shoulders), his surname, his stars (one bar: gold
+## to CURRENT, hollow up to POTENTIAL and no further), and a footer with his price (the number, then the coin) or,
 ## signed, JOINS NEXT SEASON. One button: a tap opens his profile (the player page in recruit
 ## mode, SIGN RECRUIT there). Hover brightens it, the last one opened has a gold border, a press
 ## sinks it a pixel (not with Reduce Motion).
@@ -149,13 +149,18 @@ func _card(r: Dictionary, size: Vector2 = Vector2(CARD_W, CARD_H)) -> Button:
 	var b := Deck.card(size, func(ci, _rr, mode):
 		paint_recruit(ci, size, p, team, mode, pid == sel, pinned, incoming, bool(r.get("legacy", false)), int(r.get("price", 0))), func():
 		sel = pid
-		Game.goto("player", {"id": pid, "recruit": true}))
+		Game.goto("player", {"id": pid, "recruit": true, "from": from}))
 	b.name = "Card_%d" % pid
 	b.set_meta("price", int(r.price))
 	b.set_meta("pid", pid)
 	b.set_meta("pinned", pinned)
 	b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	cards[pid] = b
+	if DevArt.is_dev(p):
+		# THE DEV RECRUIT GLITCH: on the body (not the drop shadow), sunk a pixel with the card on a press
+		DevGlitch.attach(self, b, {"seed": hash([p.dev_recruit, "market"]), "body": func(bt: Control) -> Rect2:
+			var down := 1.0 if Juice.enabled() and (bt as BaseButton).get_draw_mode() in [BaseButton.DRAW_PRESSED, BaseButton.DRAW_HOVER_PRESSED] else 0.0
+			return Rect2(0, down, bt.size.x - 2, bt.size.y - 2)})
 	return b
 
 const CARD_W := 112.0
@@ -169,6 +174,14 @@ const CARD_BG := Color("0b1d5c")
 const PORTRAIT_BG := Color("16308a")
 const PIN := [".###.", "#####", ".###.", "..#..", "..#..", "..#.."]
 
+## The market card's star bar width: a half-star ceiling ends on a cut star (half its columns).
+static func market_bar_w(fills: Array) -> float:
+	var n := fills.size()
+	if n == 0:
+		return 0.0
+	var last := int(Deck.STAR_SHAPE.half) if float(fills[n - 1].pot) < 0.99 else int(Deck.STAR_SHAPE.w)
+	return Deck.star_x(n - 1) + last
+
 ## One recruit card at `size` (static: the tests paint it too).
 static func paint_recruit(ci: CanvasItem, size: Vector2, p: PoloPlayer, team: PoloTeam, mode: String, selected: bool, pinned: bool,
 		incoming: bool, legacy: bool, price: int) -> void:
@@ -176,13 +189,20 @@ static func paint_recruit(ci: CanvasItem, size: Vector2, p: PoloPlayer, team: Po
 	var o := Vector2(0, down)
 	var w := size.x
 	var h := size.y
+	var is_dev := DevArt.is_dev(p)   # a DEV RECRUIT: the light-blue card (DevArt), same layout
 	# depth: a hard drop shadow (it stays put while the card sinks)
 	ci.draw_rect(Rect2(2, 2, w - 2, h - 2), Color(0, 0, 0, 0.35))
 	var body := Rect2(o, Vector2(w - 2, h - 2))
-	ci.draw_rect(body, CARD_BG.lightened(0.07) if mode == "hover" else CARD_BG)
+	if is_dev:
+		DevArt.panel(ci, body, mode == "hover")
+	else:
+		ci.draw_rect(body, CARD_BG.lightened(0.07) if mode == "hover" else CARD_BG)
 	# the portrait panel
 	var pan := Rect2(o + Vector2(3, 3), Vector2(w - 8, NAME_Y - 8))
-	ci.draw_rect(pan, (Color("7a1a22") if p.is_keeper() else PORTRAIT_BG).lightened(0.06 if mode == "hover" else 0.0))
+	var pan_col := DevArt.ICE_DEEP if is_dev else (Color("7a1a22") if p.is_keeper() else PORTRAIT_BG)
+	ci.draw_rect(pan, pan_col.lightened(0.06 if mode == "hover" else 0.0))
+	if is_dev:
+		ci.draw_rect(Rect2(pan.position, Vector2(pan.size.x, 1)), DevArt.CYAN)   # its lit top edge
 	var col := Portrait.colors_ours(p, team)
 	var tex := Portrait.texture(p, col[0], col[1])
 	var sz := Vector2(Portrait.SIZE) * 2.0
@@ -197,20 +217,32 @@ static func paint_recruit(ci: CanvasItem, size: Vector2, p: PoloPlayer, team: Po
 	var room := w - 12.0
 	var big := Deck.text_w(name, 16, "big") <= room
 	Deck.ctext(ci, Rect2(o + Vector2(0, NAME_Y - 6), Vector2(w - 2, 10)), Deck.fit(name, room, 16 if big else 8, "big" if big else "caps"), 16 if big else 8,
-		UI.TEXT, "big" if big else "caps")
+		DevArt.INK if is_dev else UI.TEXT, "big" if big else "caps")
+	# one bar: gold to CURRENT, hollow up to POTENTIAL, ending at his ceiling (never padded to five)
 	var cur := PlayerForm.snap_half(p.stars)
-	var sw := Deck.star_bar_w_for(cur, cur)
-	Deck.star_bar(ci, floorf(o.x + (w - 2 - sw) * 0.5), o.y + STARS_Y, cur, cur)
+	var pot := PlayerForm.snap_half(p.pot_stars)
+	var fills := Deck.star_fills(cur, pot)
+	var sw := market_bar_w(fills)
+	var sx := floorf(o.x + (w - 2 - sw) * 0.5)
+	for i in fills.size():
+		# a half-star ceiling: the last star is cut down the middle (only its left half drawn)
+		var cut := i == fills.size() - 1 and float(fills[i].pot) < 0.99
+		Deck.star_place(ci, Vector2(sx + Deck.star_x(i), o.y + STARS_Y), fills[i], Color(DevArt.INK, 0.3) if is_dev else Color(1, 1, 1, 0.14), 0,
+			int(Deck.STAR_SHAPE.half) if cut else 99)
 	# the footer
 	var foot := Rect2(o + Vector2(0, h - 2 - FOOT_H), Vector2(w - 2, FOOT_H))
 	ci.draw_rect(foot, Deck.NAVY_HEAD.lightened(0.06) if mode == "hover" else Deck.NAVY_HEAD)
 	ci.draw_rect(Rect2(foot.position, Vector2(foot.size.x, 1)), Color(UI.GOLD, 0.55) if not incoming else Color(UI.GOOD, 0.6))
+	# (a DEV Recruit's footer is everyone's: no label, the price centred; his card glitches: DevGlitch)
 	if incoming:
 		Deck.ctext(ci, foot, "COMMITTED" if legacy else "SIGNED: NEXT SEASON", 8, UI.GOOD)
 	else:
 		CreditCoin.draw_amount(ci, foot.position.x, foot.get_center().y, str(price), 8, UI.GOLD, "caps", 16, 1, foot.size.x)
-	# the border last: white; brighter on hover; gold (two pixels) for the one you opened
+	# the border last: white; brighter on hover; gold (two pixels) for the one you opened (a DEV
+	# Recruit's darker blue, electric on hover)
 	var edge := UI.GOLD if selected or mode == "down" else (UI.ACCENT if mode == "hover" else UI.BORDER)
+	if is_dev and not selected and mode != "down":
+		edge = DevArt.ELECTRIC if mode == "hover" else DevArt.EDGE
 	ci.draw_rect(body, edge, false, 1.0)
 	if selected:
 		ci.draw_rect(body.grow(-1), edge, false, 1.0)
@@ -249,8 +281,13 @@ static func ask_sign(c: Career, r: Dictionary, done: Callable) -> void:
 func _ask_refresh() -> void:
 	var cost := Recruiting.refresh_cost(c)
 	var pins := Recruiting.pinned(c).size()
-	Game.dialog("REFRESH RECRUITS?", "New prospects replace everyone on the market%s%s.\n\nRecruits you've signed stay signed, and this season's signings still count (%d / %d)." % [
-		"" if pins == 0 else " except your %d pinned" % pins, " for free" if cost == 0 else " for %s" % CreditCoin.tag(cost), Recruiting.signed_count(c), Recruiting.SIGN_MAX], [
+	# an unpinned DEV Recruit rotates out with this refresh (DevRecruits.rotate_out): said up front
+	var devs: Array = c.market.filter(func(r): return (r.p as PoloPlayer).dev_recruit != "" and not Recruiting.is_pinned(r)).map(func(r): return r.p)
+	var warn := "" if devs.is_empty() else "\n\nUNPINNED DEV RECRUIT%s: %s rotate%s out, with a %d%% chance a CPU program signs %s. Pin to keep." % [
+		"" if devs.size() == 1 else "S", " and ".join(devs.map(func(q): return "%s %s" % [q.first, q.last])), "s" if devs.size() == 1 else "",
+		roundi(DevRecruits.PICKUP_CHANCE * 100.0), "him" if devs.size() == 1 else "each"]
+	Game.dialog("REFRESH RECRUITS?", "New prospects replace everyone on the market%s%s.\n\nRecruits you've signed stay signed, and this season's signings still count (%d / %d).%s" % [
+		"" if pins == 0 else " except your %d pinned" % pins, " for free" if cost == 0 else " for %s" % CreditCoin.tag(cost), Recruiting.signed_count(c), Recruiting.SIGN_MAX, warn], [
 		["REFRESH" if cost == 0 else "REFRESH  %s" % CreditCoin.tag(cost), func():
 			var err := Recruiting.refresh(c)
 			if err != "":
@@ -259,6 +296,10 @@ func _ask_refresh() -> void:
 				return
 			Sfx.play("card")
 			sel = -1
+			for q: PoloPlayer in devs:   # (where each rotated DEV Recruit went: his news line)
+				var to := DevRecruits.school_of(c, q.dev_recruit)
+				Game.toast("DEV RECRUIT SIGNED: %s %s COMMITS TO %s" % [q.first.to_upper(), q.last.to_upper(), Colleges.short_name(c.teams[to]).to_upper()] if to != "" and c.teams.has(to)
+					else "%s %s LEFT THE MARKET UNSIGNED" % [q.first.to_upper(), q.last.to_upper()], UI.GOLD)
 			Game.save_career()
 			_render(), "primary"],
 		["CANCEL", Callable(), "ghost"]])

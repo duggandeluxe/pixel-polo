@@ -1,5 +1,5 @@
 extends RefCounted
-## Screenshots: the trophy ceremony, victory levels, lineup cards, broadcast graphics.
+## Screenshots: the trophy ceremony, lineup cards, broadcast graphics.
 ##   godot --path game -- --test stage4_png <dir>   (needs a window)
 
 static func _snap(runner, dir: String, name: String) -> void:

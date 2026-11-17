@@ -41,12 +41,16 @@ static func draw_pool(ci: CanvasItem, v: PoolView, t: float, size: Vector2, exci
 		if sp.x < -4 or sp.x > size.x or sp.y < 0 or sp.y > size.y:
 			continue
 		ci.draw_rect(Rect2(sp.x, sp.y, 2 + i % 3, 1), pool.water_shine)
+	# the distance lines, faint now: the side ropes carry the colours (still drawn, for reading the
+	# 2, 5 and 6 m out in the middle of the pool)
 	for m in [[2.0, UI.LANE_RED], [5.0, UI.LANE_YELLOW], [6.0, LANE_GREEN]]:
-		_dash_line(ci, v, m[0], m[1])
-		_dash_line(ci, v, Geo.LENGTH - m[0], m[1])
-	_dash_line(ci, v, Geo.HALF, UI.LANE_WHITE)
-	_rope(ci, v, -0.1)
-	_rope(ci, v, Geo.WIDTH + 0.1)
+		_dash_line(ci, v, m[0], Color(m[1], DASH_ALPHA))
+		_dash_line(ci, v, Geo.LENGTH - m[0], Color(m[1], DASH_ALPHA))
+	_dash_line(ci, v, Geo.HALF, Color(UI.LANE_WHITE, 0.5))
+	for ry in [ROPE_IN, Geo.WIDTH - ROPE_IN]:
+		_rope(ci, v, t, size, pool, ry, -ROPE_END, Geo.LENGTH + ROPE_END)
+	_goal_rope(ci, v, t, size, pool, 0.0)
+	_goal_rope(ci, v, t, size, pool, Geo.GOAL_X)
 	var give := Ball.net_bulge(float(net.get("t", -1.0)))
 	var hit_y := float(net.get("y", Geo.GOAL_Y))
 	var fx := net_fx(net, t)
@@ -85,7 +89,8 @@ static func _deck_tiles(ci: CanvasItem, v: PoolView, size: Vector2, pool: PoolDe
 
 ## The grandstand along the far side (world y < 0); scrolls away as the camera drops.
 ## Empty seats show when the crowd is thin.
-## `style` (CrowdArt.style: the Crowd Atmosphere level and whose fans they are); {} is the plain crowd.
+## `style` (CrowdArt.style: the Crowd Atmosphere level, which seats are taken and whose fans they
+## are); {} is the plain crowd, as full as `crowd`.
 static func _stands(ci: CanvasItem, v: PoolView, t: float, size: Vector2, excite: float, pool: PoolDef, crowd: float, style: Dictionary = {}) -> void:
 	var bottom := v.to_screen(Vector2(0, -1.0)).y
 	if bottom <= 0.0:
@@ -106,20 +111,22 @@ static func _stands(ci: CanvasItem, v: PoolView, t: float, size: Vector2, excite
 		var i := first
 		while x < size.x:
 			var seed := absi(i * 7 + row * 13 + (i * i) % 11)
-			if float((seed * 37 + i * 11) % 100) / 100.0 >= crowd:
+			var taken := (float((seed * 37 + i * 11) % 100) / 100.0 < crowd) if style.is_empty() else CrowdArt.seated(style, i, row)
+			if not taken:
 				ci.draw_rect(Rect2(x - 1, y + 4, 5, 3), seat)
 				x += 7.0
 				i += 1
 				continue
 			var col := Color(CROWD[seed % CROWD.size()]).darkened(0.1 + back * 0.1)
 			var jump := 0.0
-			if excite > 0.0:
-				jump = -roundf(absf(sin(t * 13.0 + seed)) * 3.0 * excite)
 			var skin := Color(PoloPlayer.SKIN[seed % 6]).darkened(0.2 + back * 0.08)
-			if not style.is_empty():
+			if style.is_empty():
+				if excite > 0.0:
+					jump = -roundf(absf(sin(t * 13.0 + seed)) * 3.0 * excite)
+			else:
 				col = CrowdArt.fan_colour(style, col, seed, i, row, back, v)
-				jump = minf(jump, CrowdArt.fan_jump(style, t, i, v))
-				if jump < -1.0:
+				jump = CrowdArt.fan_jump(style, t, i, v, row, seed, excite)
+				if jump < -1.0 and CrowdArt.arms(style):
 					ci.draw_rect(Rect2(x - 1, y - 2 + jump, 1, 3), skin)   # (arms up)
 					ci.draw_rect(Rect2(x + 3, y - 2 + jump, 1, 3), skin)
 			ci.draw_rect(Rect2(x, y + jump, 3, 3), skin)
@@ -139,33 +146,150 @@ static func _dash_line(ci: CanvasItem, v: PoolView, x: float, col: Color) -> voi
 		ci.draw_rect(Rect2(p.x, p.y, 1, h), col)
 		yy += 1.0
 
-static func _rope(ci: CanvasItem, v: PoolView, y: float) -> void:
-	var x := -1.5
-	var k := 0
-	while x <= Geo.LENGTH + 1.5:
-		var d := minf(x, Geo.LENGTH - x)
-		var col := UI.LANE_WHITE if k % 2 == 0 else UI.LANE_BLUE
-		if d >= 0.0:
-			if d < 2.0:
-				col = UI.LANE_RED
-			elif d < 5.0:
-				col = UI.LANE_YELLOW
-			elif d < 6.0:
-				col = LANE_GREEN
-		var p := v.to_screen(Vector2(x, y))
-		ci.draw_rect(Rect2(p.x - 1, p.y - 1, 3, 2), col)
-		x += 0.5
-		k += 1
+# ------------------------------------------------------------------ side ropes
+## The floating boundary ropes. Down both long sides, end wall to end wall: red to 2 m out from
+## each goal, yellow to 6 m, green between the 6 m lines, white behind the goal lines. Across each
+## end, all white: one rope down the goal line and one along the back of the goal cage, each from
+## the side rope to the goal and on from the goal to the other side rope. Between them the goal
+## itself joins them up: the cage (draw_goal) reaches right back to the rear rope, its rear frame in
+## the rope's place, and nothing crosses the goal mouth.
+## Art only: nothing in the play reads them (no collisions, the pool's the same size).
+const DASH_ALPHA := 0.35       # the coloured distance lines, under the ropes
+const ROPE_IN := 0.4           # m in from the side wall: a strip of water (4 px) between them
+const ROPE_PITCH := 0.2        # m from one float to the next along the pool (6 px: 5 + a gap)
+const GOAL_ROPE_PITCH := 0.4   # m from one float to the next across it (6 px: 4 + a gap)
+const ROPE_END := 1.4          # m the side ropes run on past the goal line: to 3 px off the end wall
+const BACK_ROPE := 0.7         # m behind the goal line, the rope along the back of the cage
+## Where the ropes stop at the goal, this far out from each post: above it just clear of the top of
+## the cage (0.9 m tall, seen 1.08 m up the screen: 0.9 * SZ / SY); below it, just under the cage's
+## floating base.
+const ROPE_ABOVE := 0.9 * PoolView.SZ / PoolView.SY + 0.2
+const ROPE_BELOW := 0.33
+const REENTRY := 2.0           # m of red floats at the bottom of both end ropes: the re-entry corner
+const CORNER_IN_Y := 0.2       # m a rope's floats stop short of its end float at the goal
+const ROPE_CABLE := Color("0b2a52", 0.85)
+const ROPE_SHADOW := Color("03306f", 0.45)
+const ROPE_BOB := 1.6          # the swell running down the rope (rad/s)...
+const ROPE_BOB_K := 0.55       # ...and its phase from one float to the next
+
+static func rope_colour(x: float) -> Color:
+	if x < 0.0 or x > Geo.LENGTH:
+		return UI.LANE_WHITE
+	var d := minf(x, Geo.LENGTH - x)
+	if d < 2.0:
+		return UI.LANE_RED
+	if d < Geo.GOAL_X - Geo.SIX_M:
+		return UI.LANE_YELLOW
+	return LANE_GREEN
+
+static func _rope_h(v: PoolView) -> int:
+	return maxi(2, roundi(v.sy() * 0.2))           # 3 px thick in the normal view
+
+## A rope along the pool at y, from x0 to x1 (either way round), its floats spread evenly between
+## `inset` in from each end; `white`: all white floats, else coloured by distance from the goals.
+static func _rope(ci: CanvasItem, v: PoolView, t: float, size: Vector2, pool: PoolDef, y: float,
+		x0: float, x1: float, white: bool = false, inset: float = 0.0) -> void:
+	if x1 < x0:
+		var sw := x0
+		x0 = x1
+		x1 = sw
+	var cy := v.to_screen(Vector2(0.0, y)).y
+	var h := _rope_h(v)
+	var top0 := cy - floorf(h * 0.5)
+	if top0 > size.y + 2.0 or top0 + h < -2.0:
+		return
+	var e0 := v.to_screen(Vector2(x0, y)).x
+	var e1 := v.to_screen(Vector2(x1, y)).x
+	ci.draw_rect(Rect2(minf(e0, e1), cy, absf(e1 - e0), 1), ROPE_CABLE)
+	var span := x1 - x0 - inset * 2.0
+	var n := maxi(1, int(span / ROPE_PITCH + 0.01))
+	var pitch := span / n
+	for k in n:
+		var xa := x0 + inset + k * pitch
+		var sa := v.to_screen(Vector2(xa, y)).x
+		var sb := v.to_screen(Vector2(xa + pitch, y)).x
+		var px := minf(sa, sb)
+		var w := int(absf(sb - sa)) - 1                 # a pixel of cable between floats
+		if px + w < 0.0 or px > size.x or w < 1:
+			continue
+		var col := UI.LANE_WHITE if white else rope_colour(xa + pitch * 0.5)
+		_float(ci, pool, t, k + roundi(x0 * 5.0), px, top0, w, h, col)
+
+## A white rope across the pool at x, from y0 to y1, its floats spread evenly between `in0` below
+## y0 and `in1` above y1; red past `red_from`.
+static func _vrope(ci: CanvasItem, v: PoolView, t: float, size: Vector2, pool: PoolDef, x: float,
+		y0: float, y1: float, in0: float, in1: float, red_from: float = INF) -> void:
+	var cx := v.to_screen(Vector2(x, 0.0)).x
+	if cx < -4.0 or cx > size.x + 4.0:
+		return
+	var w := _rope_h(v)                             # 3 px wide, as thin as the side ropes
+	var px := cx - floorf(w * 0.5)
+	var c0 := v.to_screen(Vector2(x, y0)).y
+	var c1 := v.to_screen(Vector2(x, y1)).y
+	ci.draw_rect(Rect2(cx, c0, 1, c1 - c0), ROPE_CABLE)
+	var span := y1 - y0 - in0 - in1
+	var n := maxi(1, int(span / GOAL_ROPE_PITCH))
+	var pitch := span / n
+	for i in n:
+		var ya := y0 + in0 + i * pitch
+		var sa := v.to_screen(Vector2(x, ya)).y
+		var sb := v.to_screen(Vector2(x, ya + pitch)).y
+		var h := int(sb - sa) - 1
+		if sb < -4.0 or sa > size.y + 4.0 or h < 1:
+			continue
+		var col := UI.LANE_RED if ya + pitch * 0.5 > red_from else UI.LANE_WHITE
+		_float(ci, pool, t, i * 3 + int(y0 * 7.0), px, sa, w, mini(h, w + 1), col)
+
+## The white ropes at the goal on the line x = gx: down the goal line and down the back of the cage,
+## each stopping at the goal (an end float on each) and going on below it.
+static func rope_top() -> float:
+	return Geo.GOAL_Y - Geo.GOAL_HALF - ROPE_ABOVE
+
+static func rope_bottom() -> float:
+	return Geo.GOAL_Y + Geo.GOAL_HALF + ROPE_BELOW
+
+static func _goal_rope(ci: CanvasItem, v: PoolView, t: float, size: Vector2, pool: PoolDef, gx: float) -> void:
+	var xb := gx + (-1.0 if gx == 0.0 else 1.0) * BACK_ROPE
+	var yt := rope_top()
+	var yb := rope_bottom()
+	var y_end := Geo.WIDTH - ROPE_IN
+	_vrope(ci, v, t, size, pool, gx, ROPE_IN, yt, 0.15, CORNER_IN_Y)
+	_vrope(ci, v, t, size, pool, gx, yb, y_end, CORNER_IN_Y, 0.15, y_end - REENTRY)
+	_vrope(ci, v, t, size, pool, xb, ROPE_IN, yt, 0.15, CORNER_IN_Y)   # (none between: the cage's rear frame)
+	_vrope(ci, v, t, size, pool, xb, yb, y_end, CORNER_IN_Y, 0.15, y_end - REENTRY)
+	var w := _rope_h(v)                             # the end floats, like the rest of their ropes
+	var h := w + 1
+	for c in [Vector2(gx, yt), Vector2(xb, yt), Vector2(gx, yb), Vector2(xb, yb)]:
+		var p := v.to_screen(c)
+		if p.x < -8.0 or p.x > size.x + 8.0 or p.y < -8.0 or p.y > size.y + 8.0:
+			continue
+		_float(ci, pool, t, roundi(c.y * 3.0), p.x - floorf(w * 0.5), p.y - floorf(h * 0.5), w, h, UI.LANE_WHITE)
+
+## One float, `w` x `h` px, its top at `top0` at rest: rounded, lit on top, shaded underneath, a
+## shadow on the water, bobbing a pixel with the swell (`k`: its place along the rope).
+static func _float(ci: CanvasItem, pool: PoolDef, t: float, k: int, px: float, top0: float, w: int, h: int, col: Color) -> void:
+	ci.draw_rect(Rect2(px, top0 + h, w, 1), ROPE_SHADOW)    # where it sits in the water
+	if w < 3 or h < 3:                              # pulled back (the sprint): plain, still floats
+		ci.draw_rect(Rect2(px, top0, w, h), col)
+		return
+	var top := top0 + (-1.0 if sin(t * ROPE_BOB - k * ROPE_BOB_K) > 0.5 else 0.0)
+	ci.draw_rect(Rect2(px, top + 1, w, h - 2), col)
+	ci.draw_rect(Rect2(px + 1, top, w - 2, 1), col.lightened(0.5))
+	ci.draw_rect(Rect2(px + 1, top + h - 1, w - 2, 1), col.darkened(0.35 if col != UI.LANE_WHITE else 0.25))
+	if sin(t * 1.1 + k * 0.9) > 0.75:             # the sun catching one now and then
+		ci.draw_rect(Rect2(px + 1, top + 1, 1, 1), Color(1, 1, 1, 0.8))
+	if sin(t * 0.9 + k * 1.7) > 0.96:             # a ripple off it
+		ci.draw_rect(Rect2(px + w - 1, top0 + h + 1, 3, 1), pool.water_shine)
 
 ## A goal on the line x = gx, the net hanging out towards `dir`. `give` 0..1: the net is
 ## stretched back round `hit_y` (a ball just hit it, see Ball.net_bulge); the frame never moves.
 ## `fx` (net_fx): a second give round fx.y2 and a shiver, for a ball in off the frame.
 static func draw_goal(ci: CanvasItem, v: PoolView, gx: float, dir: float, give: float = 0.0,
 		hit_y: float = Geo.GOAL_Y, fx: Dictionary = {}) -> void:
-	var up := 0.9 * v.sz()
+	var up := roundf(0.9 * v.sz())
 	if v.mirror:
 		dir = -dir
-	var back := Geo.NET_DEPTH * v.sx() * dir
+	var back := BACK_ROPE * v.sx() * dir   # the cage: back to the rear rope (the ball still stops NET_DEPTH in)
 	var far := v.to_screen(Vector2(gx, Geo.GOAL_Y - Geo.GOAL_HALF))
 	var near := v.to_screen(Vector2(gx, Geo.GOAL_Y + Geo.GOAL_HALF))
 	if maxf(far.x, far.x + back) < -4.0 or minf(far.x, far.x + back) > v.width + 4.0:
@@ -183,29 +307,73 @@ static func draw_goal(ci: CanvasItem, v: PoolView, gx: float, dir: float, give: 
 			wob = roundf(SHIVER_PX * float(fx.shiver) * sin(rows.size() * 2.1 + float(fx.ph) * 70.0))
 		rows.append(Vector2(y, roundf(back + dir * Ball.NET_GIVE * v.sx() * k) + dir * wob))
 		ny += 3.0
-	# the roof and the back of the net, a strip per row
-	var net := Color(1, 1, 1, 0.16)
-	for i in rows.size() - 1:
+	# The cage, a box BACK_ROPE deep behind the goal line. Seen from up here its front (the mouth)
+	# and back are edge on: a white upright line each, the crossbar and rear bar along them; what
+	# shows of the box is its roof and its two sides, all blue mesh, joined by white bars along the
+	# top and bottom edges. Back to front: the far side (through the roof), the roof, the rear frame,
+	# the near side, the front frame.
+	var lx := far.x
+	var bx := lx + roundf(back)                    # the rear frame (rigid: only the net gives)
+	var fu := far.y - up
+	var nu := near.y - up
+	_mesh(ci, lx, rows[0].y, fu, far.y, NET_MESH_BACK)                     # far side
+	_hbar(ci, lx, bx, far.y, 1, Color(FRAME_LIGHT, 0.55))                  # far bottom bar
+	for i in rows.size() - 1:                                               # roof, a strip per row
 		var a := rows[i]
-		var b := rows[i + 1]
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(far.x, a.x - up), Vector2(far.x, b.x - up),
-			Vector2(far.x + b.y, b.x - up * 0.55), Vector2(far.x + a.y, a.x - up * 0.55)]), net)
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(far.x + a.y, a.x - up * 0.55), Vector2(far.x + b.y, b.x - up * 0.55),
-			Vector2(far.x + b.y, b.x), Vector2(far.x + a.y, a.x)]), net)
-	# mesh
-	var mesh := Color(1, 1, 1, 0.35)
-	for r in rows:
-		ci.draw_line(Vector2(far.x, r.x - up), Vector2(far.x + r.y, r.x - up * 0.55), mesh)
-	for i in rows.size() - 1:
-		var a := rows[i]
-		var b := rows[i + 1]
-		ci.draw_line(Vector2(far.x + a.y, a.x - up * 0.55), Vector2(far.x + b.y, b.x - up * 0.55), mesh)
-		ci.draw_line(Vector2(far.x + a.y, a.x), Vector2(far.x + b.y, b.x), mesh)
-	# frame: posts and crossbar
-	ci.draw_rect(Rect2(far.x - 1, far.y - up, 2, up), FRAME)
-	ci.draw_rect(Rect2(near.x - 1, near.y - up, 2, up + 1), FRAME)
-	ci.draw_rect(Rect2(far.x - 1, far.y - up - 1, 2, near.y - far.y + 2), FRAME)
+		var top := a.x - up
+		var bot := rows[i + 1].x - up
+		_mesh(ci, lx, a.y, top, bot, NET_MESH)
+		ci.draw_rect(Rect2(lx + a.y - (1.0 if dir > 0.0 else 0.0), top, 1, bot - top), NET_MESH)   # the back of the net
+	_hbar(ci, lx, bx, fu, 1, FRAME_LIGHT)                                   # far top bar
+	_mesh(ci, lx, rows[rows.size() - 1].y, nu, near.y, NET_MESH)           # near side
+	_hbar(ci, lx, bx, nu, 1, FRAME)                                         # near top bar
+	# the rear frame, standing in for the rear rope between its end floats above and below the goal:
+	# thin and a shade grey (the front frame's the bold one), down to the bottom of the base
+	var r0 := v.to_screen(Vector2(gx, rope_top())).y + 2.0
+	ci.draw_rect(Rect2(bx, r0, 1, near.y + BASE_PX - r0), FRAME_REAR)
+	# the floating base under the near side, BASE_PX thick: lit top, mid grey side, dark underside
+	_hbar(ci, lx, bx, near.y, 1, FRAME)
+	_hbar(ci, lx, bx, near.y + 1, 1, BASE_MID)
+	_hbar(ci, lx, bx, near.y + 2, 1, FRAME_DARK)
+	# the front frame, posts and crossbar: the boldest thing on the cage, 3 px of white and a pixel
+	# of shade on the net side (centred on the goal line, as before; the mouth's the same)
+	var fl := lx - 1.0 if dir > 0.0 else lx - 2.0       # its pool-side edge
+	ci.draw_rect(Rect2(fl, fu - 2, 4, near.y - fu + 3), FRAME)
+	ci.draw_rect(Rect2(fl + (3.0 if dir > 0.0 else 0.0), fu - 1, 1, near.y - fu + 2), FRAME_DARK)
 	ci.draw_rect(Rect2(near.x - 2, near.y + 1, 4, 1), Color(UI.WATER_SHINE, 0.7))
+
+const NET_MESH := Color("17399a", 0.85)        # the goal net: deep blue strands...
+const NET_MESH_BACK := Color("0c2363", 0.6)    # ...darker on the far side, seen through the roof
+const NET_FILL := Color("0a2a7a", 0.22)
+const NET_CELL := 3                            # px between strands
+const FRAME_LIGHT := Color("d3d8e0")           # the cage's bars away from us...
+const FRAME_DARK := Color("8d97a6")            # ...and their shaded edges
+const FRAME_REAR := Color("aeb6c2")            # the rear frame, thin and greyed back
+const BASE_MID := Color("b3bac6")              # the floating base's side, between lit top and dark underside
+const BASE_PX := 3                             # px thick, the base
+
+## A bar along the pool from x0 to x1 (either way round), `h` px thick.
+static func _hbar(ci: CanvasItem, x0: float, x1: float, y: float, h: float, col: Color) -> void:
+	ci.draw_rect(Rect2(minf(x0, x1), y, absf(x1 - x0) + 1, h), col)
+
+## A panel of net from the goal line fx, `depth` px back (signed), screen rows y0..y1: a faint fill
+## and a square mesh, strands every NET_CELL px (lined up on fx and on the screen grid, so the roof's
+## strips and the sides join up).
+static func _mesh(ci: CanvasItem, fx: float, depth: float, y0: float, y1: float, col: Color) -> void:
+	if y1 <= y0 or absf(depth) < 1.0:
+		return
+	var x0 := minf(fx, fx + depth)
+	var w := absf(depth)
+	ci.draw_rect(Rect2(x0, y0, w, y1 - y0), NET_FILL)
+	var y := y0 + fposmod(-y0, NET_CELL)
+	while y < y1:
+		ci.draw_rect(Rect2(x0, y, w, 1), col)
+		y += NET_CELL
+	var step := NET_CELL if depth > 0.0 else -NET_CELL
+	var x := fx + step
+	while absf(x - fx) < w:
+		ci.draw_rect(Rect2(x, y0, 1, y1 - y0), col)
+		x += step
 
 # ------------------------------------------------------------------ players
 ## `design`: a cap design (Caps) drawn over the cap; "" or "classic" for none.
@@ -355,9 +523,22 @@ static func _keeper_arms(px: Callable, s: Swimmer, skin: Color) -> void:
 		px.call(7, -6, 2, 3, skin)
 		return
 	if absf(d) < 0.2:
-		# set: both hands up
-		px.call(-9, -15, 2, 11, skin)
-		px.call(7, -15, 2, 11, skin)
+		if s.arm > 0.4:
+			# the ball held up over his head after a catch (Play.held_at): one hand under it, the
+			# other down in the water, sculling
+			px.call(4, -16, 2, 12, skin)
+			px.call(-9, -2, 3, 1, Color(skin, 0.55))
+			return
+		# set: treading water, shoulders just out, arms down and both hands under the surface,
+		# sculling side to side, until he reacts (a dive or block raises them: _keeper_dive)
+		var sc := int(fposmod(s.anim * 2.0, 2.0))
+		var sub := Color(skin, 0.55)                     # (seen through the water)
+		px.call(-8, -4, 2, 2, skin)                      # upper arms angled down off the shoulders...
+		px.call(6, -4, 2, 2, skin)
+		px.call(-10 - sc, -1, 3, 1, sub)                 # ...hands just under the surface, sculling
+		px.call(8 + sc, -1, 3, 1, sub)
+		px.call(-12 - sc, 0, 2, 1, Color(UI.WATER_SHINE, 0.65))   # the ripple they make
+		px.call(11 + sc, 0, 2, 1, Color(UI.WATER_SHINE, 0.65))
 		return
 	# lunge: arm stretched towards the dive (up or down the screen), splash under it
 	var reach := int(6 + absf(d) * 9)

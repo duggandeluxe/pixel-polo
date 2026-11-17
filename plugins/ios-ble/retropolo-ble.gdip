@@ -15,4 +15,4 @@ capabilities=[]
 files=[]
 
 [plist]
-NSBluetoothAlwaysUsageDescription:string="Retro Polo uses Bluetooth to play a friend nearby, even with no Wi-Fi."
+NSBluetoothAlwaysUsageDescription:string="Pixel Polo uses Bluetooth to play a friend nearby, even with no Wi-Fi."

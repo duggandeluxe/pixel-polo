@@ -4,8 +4,11 @@ extends Node
 ##   godot --headless --path game -- --test shots | possessions | matches
 ##   godot --headless --path game -- --test tutorial    (the tutorial, all four parts played through)
 ##   godot --headless --path game -- --test career_tutorial   (a new career's tutorial: pop-ups, SKIP, TRAINING COMPLETE; no Coaching Tips)
+##   godot --headless --path game -- --test career_tour       (the first career's guided tour of the screens: first career only, once)
 ##   godot --headless --path game -- --test leadpass    (lead passes on the break: run onto it, never turn back)
-##   godot --headless --path game -- --test star_fx     (HOT star animations, Developer Mode, the roster formation)
+##   godot --headless --path game -- --test counter_curl [n] (the counter's 2 m curl; activation unchanged; n bot matches)
+##   godot --path game -- --test counter_curl_png <outdir> (the COUNTERATTACK CURL TEST lab at its moments)
+##   godot --headless --path game -- --test star_fx    (HOT star animations, Developer Mode, the roster formation)
 ##   godot --headless --path game -- --test hot_reveal  (the postgame HOT star reveal and its Developer Mode preview)
 ##   godot --headless --path game -- --test tempo       (team skill: shot pace, one speed per shot, passing tempo)
 ##   godot --headless --path game -- --test attrs       (player attributes: ratings, gameplay, saves, upgrades)
@@ -13,14 +16,20 @@ extends Node
 ##   godot --headless --path game -- --test development (XP, hidden levels, tokens, training, injuries, AI, saves)
 ##   godot --headless --path game -- --test xp_update   (XP Development Update 2.0: no cap, class XP, stats, mandatory upgrades)
 ##   godot --headless --path game -- --test coaching    (Coaching: gameplan, scouting, top targets, PRESS + your drop, the halftime adjustment)
+##   godot --headless --path game -- --test scout_reveal  (SCOUT OPPONENT's garage door: the opponent, the roll up, skip, Reduce motion)
+##   godot --path game --resolution 1440x810 -- --test scout_reveal_png <outdir>
 ##   godot --headless --path game -- --test glory   (the Road to Glory: school cards, tiers, achievements, the profile)
 ##   godot --path game -- --test glory_png <outdir>   (its screens, and the layouts at four screen shapes)
 ##   godot --path game -- --test coaching_png <outdir>  (Coaching, scouting, the two-button bar, halftime, the adjustment)
 ##   godot --headless --path game -- --test dev_balance [seasons] (the development season simulation report)
 ##   godot --headless --path game -- --test team_ovr (2.0 team overall, first rosters from the original OVR)
+##   godot --headless --path game -- --test hot_cap     (three hot players a team at most, outplaying one for a spot; the flame badge)
 ##   godot --headless --path game -- --test hot_card    (HOT stars everywhere alike, the card flip, momentum, the HOT tip)
 ##   godot --headless --path game -- --test keeper_timing (stars in the in-game tag, the keeper's timed dive, low / high shots)
 ##   godot --headless --path game -- --test goal_show   (a goal's show: stages, scorer, board, clock, skip, stats once)
+##   godot --path game -- --test break_png <outdir>  (the quarter-break scoreboards; GOAL! at one spot from every play)
+##   godot --headless --path game -- --test sim_realism [n] (simulated margins by OVR gap, SIM TO END from any point, its speed)
+##   godot --headless --path game -- --test sim         (LIVE SIM: the pause menu's SIM, goal slowdowns, RETURN TO GAME, a simmed career game)
 ##   godot --headless --path game -- --test bar_hit     (BAR-IN! / BAR-DOWN!: the pick, the share, the ricochet, counted once)
 ##   godot --headless --path game -- --test ai          (the AI keeper's dives, centre play, difficulty as decisions, DYNAMIC)
 ##   godot --headless --path game -- --test ai_balance [n] (the balancing numbers: keeper, centre, difficulty)
@@ -37,10 +46,13 @@ extends Node
 ##   godot --headless --path game -- --test formation_balance [n] (their attack against each of your formations)
 ##   godot --headless --path game -- --test formation_trace <formation 0-4> [n] (developer: possessions traced line by line)
 ##   godot --path game -- --test formation_png <outdir>  (the formation bar, each formation, their call on your attack)
+##   godot --path game -- --test pregame_levels_png <outdir> (the four Pregame Presentation levels at their key moments)
 ##   godot --path game -- --test shots_png <outdir>      (screenshots, needs a window)
 ##   godot --path game -- --test goal_png <outdir>       (a goal going in at each end, the quarter card)
 ##   godot --path game -- --test penalty_png <outdir>    (the 5 m formation, the shootout, their keeper's guess)
 ##   godot --path game -- --test keeper_png <outdir>     (your keeper: tracking, both lunges, the block, a corner save)
+##   godot --path game -- --test screen_profile [warm]  (how long each screen freezes the game opening; see screen_load_profile.gd)
+##   godot --headless --path game -- --test starters_memo (PoloTeam.starters() remembered always equals a fresh pick)
 
 var failures := 0
 var checks := 0
@@ -49,7 +61,7 @@ func run(args: Array) -> void:
 	var mode: String = args[0] if args.size() > 0 else "all"
 	# (the suites stage formations by hand; the foul a real call makes first is --test refinement's,
 	# and refine_measure's and the bot matches' own)
-	Play.instant_drops = not mode in ["refine_measure", "defense_ai_balance", "formation_balance"]
+	Play.instant_drops = not mode in ["refine_measure", "defense_ai_balance", "formation_balance", "offense_probe"]
 	match mode:
 		"shots":
 			test_shots()
@@ -87,10 +99,22 @@ func run(args: Array) -> void:
 			load("res://tests/lead_pass_test.gd").new().run(self)
 		"counter":
 			load("res://tests/counter_test.gd").new().run(self)
+		"final_shot":
+			load("res://tests/final_shot_test.gd").new().run(self)
+		"man_up_carry":
+			load("res://tests/man_up_carry_test.gd").new().run(self)
+		"counter_curl":
+			await load("res://tests/counter_curl_test.gd").new().run(self)
 		"tutorial":
 			await load("res://tests/tutorial_test.gd").new().run(self)
 		"career_tutorial":
 			await load("res://tests/career_tutorial_test.gd").new().run(self)
+		"career_tour":
+			await load("res://tests/career_tour_test.gd").new().run(self)
+		"hot_tutorial":
+			await load("res://tests/hot_tutorial_test.gd").new().run(self)
+		"player_dev":
+			await load("res://tests/player_dev_test.gd").new().run(self)
 		"formation":
 			test_formation()
 		"blocks":
@@ -134,20 +158,18 @@ func run(args: Array) -> void:
 			await load("res://tests/postgame_test.gd").new().run(self)
 		"fouls":
 			await load("res://tests/fouls_test.gd").new().run(self)
-		"division_measure":
-			load("res://tests/division_measure.gd").new().run(self)
-		"division_png":
-			await load("res://tests/division_shots.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
-		"divisions":
-			await load("res://tests/division_test.gd").new().run(self)
-		"record_book_expansion_gen":
-			load("res://tests/record_book_expansion_gen.gd").new().run(self)
 		"record_book_gen":
 			load("res://tests/record_book_gen.gd").new().run(self)
 		"refinement":
 			await load("res://tests/refinement_test.gd").new().run(self)
 		"refine_measure":
 			await load("res://tests/refinement_measure.gd").new().run(self, int(args[1]) if args.size() > 1 else 200)
+		"sim":
+			await load("res://tests/sim_mode_test.gd").new().run(self, args[1] if args.size() > 1 else "")
+		"sim_png":
+			await load("res://tests/sim_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"sim_end_png":
+			await load("res://tests/sim_end_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"sim_parity":
 			await load("res://tests/sim_parity_test.gd").new().run(self)
 		"rollout":
@@ -156,12 +178,12 @@ func run(args: Array) -> void:
 			load("res://tests/red_x_test.gd").new().run(self)
 		"wing_lob":
 			load("res://tests/wing_lob_test.gd").new().run(self)
+		"inside_water_penalty":
+			load("res://tests/inside_water_penalty_test.gd").new().run(self)
 		"center_rebound":
 			load("res://tests/center_rebound_test.gd").new().run(self)
 		"man_down":
 			load("res://tests/man_down_zone_test.gd").new().run(self)
-		"hibernation_png":
-			await load("res://tests/hibernation_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"man_up_png":
 			await load("res://tests/man_up_cam_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"all_teams":
@@ -178,6 +200,8 @@ func run(args: Array) -> void:
 			await load("res://tests/season_path_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"reset":
 			await load("res://tests/reset_test.gd").new().run(self)
+		"big_four":
+			load("res://tests/big_four_test.gd").new().run(self)
 		"standings_board":
 			await load("res://tests/standings_board_test.gd").new().run(self)
 		"standings_board_png":
@@ -190,6 +214,18 @@ func run(args: Array) -> void:
 			await load("res://tests/postgame_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"glory_png":
 			await load("res://tests/glory_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"scout_reveal":
+			await load("res://tests/scout_reveal_test.gd").new().run(self)
+		"walk_ons":
+			await load("res://tests/walk_ons_test.gd").new().run(self)
+		"walk_ons_png":
+			await load("res://tests/walk_ons_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"team_unlock":
+			await load("res://tests/team_unlock_test.gd").new().run(self)
+		"team_unlock_png":
+			await load("res://tests/team_unlock_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"scout_reveal_png":
+			await load("res://tests/scout_reveal_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"coaching_png":
 			await load("res://tests/coaching_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"xp_update_png":
@@ -208,14 +244,23 @@ func run(args: Array) -> void:
 			await load("res://tests/team_ovr_test.gd").new().run(self)
 		"hot_card":
 			await load("res://tests/hot_card_test.gd").new().run(self)
+		"hot_cap":
+			load("res://tests/hot_cap_test.gd").new().run(self)
 		"roster_visual":
 			await load("res://tests/roster_visual_test.gd").new().run(self)
 		"ai":
 			load("res://tests/ai_overhaul_test.gd").new().run(self)
 		"formations":
 			await load("res://tests/formation_test.gd").new().run(self)
+		"drop_wings":
+			load("res://tests/drop_wings_test.gd").new().run(self)
+		"call_drop":
+			await load("res://tests/call_drop_test.gd").new().run(self)
+		"call_drop_png":
+			await load("res://tests/call_drop_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"piston":
 			await load("res://tests/piston_test.gd").new().run(self)
+			load("res://tests/inside_water_penalty_test.gd").new().run(self)
 		"shot_stick":
 			await load("res://tests/shot_stick_test.gd").new().run(self)
 		"goalie_tweaks":
@@ -224,14 +269,20 @@ func run(args: Array) -> void:
 			await load("res://tests/goalie_tweaks_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"shot_stick_png":
 			await load("res://tests/shot_stick_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"counter_curl_png":
+			await load("res://tests/counter_curl_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"piston_png":
 			await load("res://tests/piston_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"formation_png":
 			await load("res://tests/formation_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"formation_trace":
 			load("res://tests/formation_test.gd").trace(self, int(args[1]), int(args[2]) if args.size() > 2 else 4)
+		"offense_probe":
+			load("res://tests/offense_probe.gd").run(self, int(args[1]) if args.size() > 1 else 60, float(args[2]) if args.size() > 2 else Difficulty.MEDIUM)
 		"formation_balance":
 			load("res://tests/formation_test.gd").balance(self, int(args[1]) if args.size() > 1 else 200)
+		"ai_overhaul_part":
+			load("res://tests/ai_overhaul_test.gd").part(self, args.slice(1))
 		"ai_balance":
 			Difficulty.cpu_neutral = "nocpu" in args
 			load("res://tests/ai_overhaul_test.gd").balance(self, int(args[1]) if args.size() > 1 else 8)
@@ -241,6 +292,8 @@ func run(args: Array) -> void:
 			load("res://tests/keeper_overhaul_test.gd").new().run(self)
 		"defense_ai":
 			load("res://tests/defense_ai_test.gd").new().run(self)
+		"two_md":
+			load("res://tests/two_md_test.gd").new().run(self)
 		"keeper_overhaul_balance":
 			load("res://tests/keeper_overhaul_test.gd").balance(self, int(args[1]) if args.size() > 1 else 8)
 		"keeper_measure":
@@ -256,14 +309,22 @@ func run(args: Array) -> void:
 			await load("res://tests/hot_reveal_test.gd").new().run(self)
 		"goal_show":
 			await load("res://tests/goal_show_test.gd").new().run(self)
+		"break_png":
+			await load("res://tests/goal_show_test.gd").break_shots(self, args[1] if args.size() > 1 else "/tmp")
 		"goal_show_png":
 			await load("res://tests/goal_show_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"bar_hit":
 			await load("res://tests/bar_hit_test.gd").new().run(self)
 		"bar_hit_png":
 			await load("res://tests/bar_hit_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"exclusion_box_png":
+			await load("res://tests/exclusion_box_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"rope_png":
+			await load("res://tests/rope_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"shot_clock_png":
 			await load("res://tests/shot_clock_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"scoreboard_png":
+			await load("res://tests/scoreboard_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"callout_png":
 			await load("res://tests/callout_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"tempo":
@@ -283,6 +344,22 @@ func run(args: Array) -> void:
 			print("per side, played [to, st, ex, ed]: %s   simulated: %s   top scorer's share: %.3f, of a season: %.3f" % [str(m.played), str(m.simmed), float(m.top_share), float(m.season_share)])
 		"dynasty_hub":
 			await load("res://tests/dynasty_hub_test.gd").new().run(self)
+		"hub_entry":
+			await load("res://tests/hub_entry_test.gd").new().run(self)
+		"hub_entry_png":
+			await load("res://tests/hub_entry_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"new_recruits":
+			await load("res://tests/new_recruits_test.gd").new().run(self)
+		"new_recruits_png":
+			await load("res://tests/new_recruits_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"injury_notice":
+			await load("res://tests/injury_notice_test.gd").new().run(self)
+		"injury_notice_png":
+			await load("res://tests/injury_notice_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"record_holders":
+			await load("res://tests/record_holders_test.gd").new().run(self)
+		"record_holders_png":
+			await load("res://tests/record_holders_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"star_display":
 			await load("res://tests/star_display_test.gd").new().run(self)
 		"roster_current":
@@ -295,16 +372,28 @@ func run(args: Array) -> void:
 			await load("res://tests/hot_balance_test.gd").new().run(self)
 		"visual_shop":
 			await load("res://tests/visual_shop_test.gd").new().run(self)
-		"starting_seven":
-			await load("res://tests/starting_seven_test.gd").new().run(self)
-		"starting_seven_png":
-			await load("res://tests/starting_seven_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"scoreboard":
+			await load("res://tests/scoreboard_test.gd").new().run(self)
+		"roster_set":
+			await load("res://tests/roster_set_test.gd").new().run(self)
+		"roster_cuts":
+			await load("res://tests/roster_cuts_test.gd").new().run(self)
+		"roster_cuts_png":
+			await load("res://tests/roster_cuts_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"roster_set_png":
+			await load("res://tests/roster_set_test.gd").new().shots(self, args[1] if args.size() > 1 else "/tmp")
+		"lucky_spin":
+			await load("res://tests/lucky_spin_test.gd").new().run(self)
+		"app_store":
+			await load("res://tests/app_store_test.gd").new().run(self)
+		"lucky_spin_png":
+			await load("res://tests/lucky_spin_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"fine_logos":
 			await load("res://tests/fine_logos_test.gd").new().run(self)
+		"news_png":
+			await load("res://tests/news_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"fine_logos_png":
 			await load("res://tests/fine_logos_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
-		"replay":
-			await load("res://tests/replay_test.gd").new().run(self)
 		"goal_crowd":
 			await load("res://tests/goal_crowd_test.gd").new().run(self)
 		"stage4":
@@ -313,14 +402,17 @@ func run(args: Array) -> void:
 			await load("res://tests/stage4_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"goal_crowd_png":
 			await load("res://tests/goal_crowd_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
-		"replay_png":
-			await load("res://tests/replay_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"shop_png":
 			await load("res://tests/shop_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"pregame":
 			await load("res://tests/pregame_test.gd").new().run(self)
 		"pregame_png":
 			await load("res://tests/pregame_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"pregame_levels_png":
+			await load("res://tests/pregame_levels_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"cpu_coach_measure":
+			Store.reset_for_tests()
+			load("res://tests/cpu_coach_measure.gd").new().run(self, int(args[1]) if args.size() > 1 else 1)
 		"hot_balance_measure":
 			Store.reset_for_tests()
 			var mults: Array = [1.0, PlayerForm.HOT_STAR_ACQUISITION_MULTIPLIER] if args.size() < 3 else Array(String(args[2]).split(",")).map(func(x): return float(x))
@@ -361,6 +453,16 @@ func run(args: Array) -> void:
 			await load("res://tests/roster_needs_test.gd").new().run(self)
 		"settings":
 			await load("res://tests/settings_test.gd").new().run(self)
+		"language":
+			await load("res://tests/language_test.gd").new().run(self)
+		"loc_fit":
+			await load("res://tests/language_test.gd").fit_survey(self, args[1] if args.size() > 1 else "all", args[2] if args.size() > 2 else "")
+		"loc_missing":
+			await load("res://tests/language_test.gd").missing(self, args[1] if args.size() > 1 else "/tmp/loc_missing.json")
+		"language_png":
+			await load("res://tests/language_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp", args[2] if args.size() > 2 else "")
+		"toast_png":
+			await load("res://tests/toast_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"settings_png":
 			await load("res://tests/settings_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"challenge_show":
@@ -375,6 +477,16 @@ func run(args: Array) -> void:
 			await load("res://tests/title_fit_test.gd").new().run(self)
 		"title_fit_png":
 			await load("res://tests/title_fit_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"bar_fx":
+			await load("res://tests/bar_fx_test.gd").new().run(self)
+		"bar_fx_png":
+			await load("res://tests/bar_fx_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"dev_recruits", "admin_recruits":
+			await load("res://tests/dev_recruits_test.gd").new().run(self)
+		"dev_glitch_png":
+			await load("res://tests/dev_recruits_test.gd").glitch_shots(self, args[1] if args.size() > 1 else "/tmp")
+		"dev_recruits_png", "admin_recruits_png":
+			await load("res://tests/dev_recruits_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"recruit_cards":
 			await load("res://tests/recruit_cards_test.gd").new().run(self)
 		"recruit_cards_png":
@@ -393,6 +505,8 @@ func run(args: Array) -> void:
 			await load("res://tests/coaching_events_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"coaching_events":
 			await load("res://tests/coaching_events_test.gd").new().run(self)
+		"career_stats":
+			await load("res://tests/career_stats_test.gd").run(self, args[1] if args.size() > 1 else "")
 		"trophy_nav":
 			await load("res://tests/trophy_nav_test.gd").run(self)
 		"trophy_png":
@@ -409,6 +523,18 @@ func run(args: Array) -> void:
 			await load("res://tests/hometown_test.gd").new().run(self)
 		"accolades":
 			await load("res://tests/accolades_test.gd").new().run(self)
+		"postseason_awards":
+			await load("res://tests/postseason_awards_test.gd").new().run(self)
+		"postseason_awards_png":
+			await load("res://tests/postseason_awards_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"postseason_advance":
+			await load("res://tests/postseason_advance_test.gd").new().run(self)
+		"postseason_advance_png":
+			await load("res://tests/postseason_advance_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"elimination":
+			await load("res://tests/elimination_test.gd").new().run(self)
+		"elimination_png":
+			await load("res://tests/elimination_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"bracket":
 			await load("res://tests/bracket_test.gd").new().run(self)
 		"bracket_png":
@@ -429,6 +555,8 @@ func run(args: Array) -> void:
 			await load("res://tests/portrait_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
 		"recruiting", "credit_economy":
 			await load("res://tests/credit_economy_test.gd").new().run(self)
+		"sim_realism":
+			await load("res://tests/sim_realism_test.gd").new().run(self, int(args[1]) if args.size() > 1 else 5000)
 		"engine":
 			await load("res://tests/engine_test.gd").new().run(self, int(args[1]) if args.size() > 1 else 20000)
 		"names":
@@ -450,16 +578,36 @@ func run(args: Array) -> void:
 			await load("res://tests/form_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"star_fx_png":
 			await load("res://tests/star_fx_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"hud_dev_stars_png":
+			await load("res://tests/hud_dev_star_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"hot_reveal_png":
 			await load("res://tests/hot_reveal_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"attr_png":
 			await load("res://tests/attr_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"hot_badge_png":
+			await load("res://tests/hot_badge_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"roster_png":
 			await load("res://tests/roster_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"screen_profile":
+			await load("res://tests/screen_load_profile.gd").run(self, args.size() > 1 and args[1] == "warm")
+		"starters_memo":
+			load("res://tests/screen_load_profile.gd").fuzz_starters(self)
+		"screen_bench":
+			await load("res://tests/screen_load_profile.gd").bench(self)
 		"career_png":
 			await load("res://tests/career_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"season_review_png":
+			await load("res://tests/season_review_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
+		"polo_plus_png":
+			await load("res://tests/polo_plus_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"recruiting_png", "credit_economy_png":
 			await load("res://tests/credit_economy_test.gd").shots(self, args[1] if args.size() > 1 else "/tmp")
+		"career_tour_png":
+			await load("res://tests/career_tour_test.gd").new().run_png(self, args[1] if args.size() > 1 else "/tmp")
+		"hot_tutorial_png":
+			await load("res://tests/hot_tutorial_test.gd").new().run_png(self, args[1] if args.size() > 1 else "/tmp")
+		"player_dev_png":
+			await load("res://tests/player_dev_test.gd").new().run_png(self, args[1] if args.size() > 1 else "/tmp")
 		"tutorial_png":
 			await load("res://tests/tutorial_shots.gd").run(self, args[1] if args.size() > 1 else "/tmp")
 		"slots_png":
@@ -480,7 +628,7 @@ func run(args: Array) -> void:
 			load("res://tests/match_stats.gd").new().run(self, int(args[1]) if args.size() > 1 else 60)
 		"offense":
 			if args.size() > 1:
-				load("res://tests/offense_stats.gd").new().run(self, int(args[1]), false, float(args[2]) if args.size() > 2 else Difficulty.MEDIUM)
+				load("res://tests/offense_stats.gd").new().run(self, int(args[1]), false, float(args[2]) if args.size() > 2 else Difficulty.BASELINE)
 			else:
 				test_offense()
 		_:
@@ -515,6 +663,9 @@ func run(args: Array) -> void:
 			await load("res://tests/home_waters_test.gd").new().run(self)
 			load("res://tests/bench_test.gd").new().run(self)
 			await load("res://tests/dynasty_hub_test.gd").new().run(self)
+			await load("res://tests/new_recruits_test.gd").new().run(self)
+			await load("res://tests/injury_notice_test.gd").new().run(self)
+			await load("res://tests/record_holders_test.gd").new().run(self)
 			await load("res://tests/star_display_test.gd").new().run(self)
 			await load("res://tests/roster_current_test.gd").new().run(self)
 			await load("res://tests/hot_stars_test.gd").new().run(self)
@@ -523,9 +674,9 @@ func run(args: Array) -> void:
 			await load("res://tests/hot_balance_test.gd").new().run(self)
 			await load("res://tests/pregame_test.gd").new().run(self)
 			await load("res://tests/visual_shop_test.gd").new().run(self)
+			await load("res://tests/scoreboard_test.gd").new().run(self)
+			await load("res://tests/lucky_spin_test.gd").new().run(self)
 			await load("res://tests/fine_logos_test.gd").new().run(self)
-			await load("res://tests/starting_seven_test.gd").new().run(self)
-			await load("res://tests/replay_test.gd").new().run(self)
 			await load("res://tests/goal_crowd_test.gd").new().run(self)
 			await load("res://tests/stage4_test.gd").new().run(self)
 			load("res://tests/long_term_dev_test.gd").new().run(self)
@@ -539,12 +690,14 @@ func run(args: Array) -> void:
 			test_ovr_effect()
 			await test_realign()
 			await load("res://tests/engine_test.gd").new().run(self)
+			load("res://tests/big_four_test.gd").new().run(self)
 			await load("res://tests/form_test.gd").new().run(self)
 			await load("res://tests/attr_test.gd").new().run(self)
 			await load("res://tests/progression_test.gd").new().run(self)
 			await load("res://tests/development_test.gd").new().run(self)
 			await load("res://tests/xp_update_test.gd").new().run(self)
 			await load("res://tests/coaching_test.gd").new().run(self)
+			await load("res://tests/scout_reveal_test.gd").new().run(self)
 			await load("res://tests/glory_test.gd").new().run(self)
 			await load("res://tests/roster_ratings_test.gd").new().run(self)
 			await load("res://tests/postgame_test.gd").new().run(self)
@@ -555,6 +708,7 @@ func run(args: Array) -> void:
 			await load("res://tests/team_ovr_test.gd").new().run(self)
 			await load("res://tests/star_fx_test.gd").new().run(self)
 			await load("res://tests/hot_card_test.gd").new().run(self)
+			load("res://tests/hot_cap_test.gd").new().run(self)
 			await load("res://tests/roster_visual_test.gd").new().run(self)
 			await load("res://tests/hot_reveal_test.gd").new().run(self)
 			load("res://tests/keeper_timing_test.gd").new().run(self)
@@ -569,12 +723,20 @@ func run(args: Array) -> void:
 			test_moments()
 			load("res://tests/lead_pass_test.gd").new().run(self)
 			load("res://tests/counter_test.gd").new().run(self)
+			load("res://tests/final_shot_test.gd").new().run(self)
+			await load("res://tests/counter_curl_test.gd").new().run(self)
 			await load("res://tests/tutorial_test.gd").new().run(self)
 			await load("res://tests/career_tutorial_test.gd").new().run(self)
+			await load("res://tests/career_tour_test.gd").new().run(self)
+			await load("res://tests/hot_tutorial_test.gd").new().run(self)
+			await load("res://tests/player_dev_test.gd").new().run(self)
 			load("res://tests/ai_overhaul_test.gd").new().run(self)
 			load("res://tests/keeper_overhaul_test.gd").new().run(self)
 			await load("res://tests/formation_test.gd").new().run(self)
+			await load("res://tests/call_drop_test.gd").new().run(self)
 			await load("res://tests/piston_test.gd").new().run(self)
+			load("res://tests/inside_water_penalty_test.gd").new().run(self)
+			load("res://tests/drop_wings_test.gd").new().run(self)
 			await load("res://tests/shot_stick_test.gd").new().run(self)
 			await load("res://tests/goalie_tweaks_test.gd").new().run(self)
 			load("res://tests/defense_ai_test.gd").new().run(self)
@@ -1231,7 +1393,7 @@ func test_offense() -> void:
 	var spots := ["sh_C", "sh_wing", "sh_flat", "sh_point"].filter(func(k): return g.call(k) >= 0.04 * g.call("shots"))
 	check(spots.size() == 4, "they shoot from the centre, the wings, the flats and the point")
 	check(g.call("sh_out6") == 0.0 and g.call("our_out6") == 0.0 and g.call("our_shots") > 0.0,
-		"no AI shot from outside 6 m, theirs or the bot's (%d, %d)" % [int(g.call("sh_out6")), int(g.call("our_out6"))])
+		"no AI shot from outside 6 m, theirs or the bot's, bar the buzzer's (%d, %d; %d at the buzzer)" % [int(g.call("sh_out6")), int(g.call("our_out6")), int(g.call("sh_buzzer"))])
 	check(g.call("catch_shoot") > 0.3 * g.call("shots"), "plenty of catch and shoot")
 	check(g.call("drives") + g.call("stride") > 0.0, "they drive into open water")
 	check(g.call("moving") / maxf(1.0, g.call("samples")) > 0.6, "their men off the ball keep moving")
@@ -1809,10 +1971,7 @@ func test_summary() -> void:
 	var scr = Game.current_screen
 	check(Game.current_name == "game_summary" and scr.stage == 0, "the summary opens on FINAL")
 	check(scr.won and Schedule.score_text(scr.g, scr.s.home) == "6-3", "it shows this game's result")
-	check(scr.league.size() > 0 and scr.league.all(func(gg): return gg != scr.g), "the rest of the conference's week, not your game")
-	check(scr.league_title == "AROUND THE %s" % c.conf_abbr(), "conference play: AROUND THE %s" % c.conf_abbr())
-	check(scr.league.all(func(gg): return (c.teams[gg.h] as PoloTeam).conf == c.team().conf or (c.teams[gg.a] as PoloTeam).conf == c.team().conf),
-		"...with this conference's games")
+	check(not ("league" in scr) and not ("league_title" in scr), "no AROUND THE ... scoreboard in the postgame any more (it's on COLLEGE WATER POLO)")
 	check(scr.bits.size() > 0, "a win gets its confetti")
 	scr.t = 0.05
 	scr.tap(Vector2(10, 10))
@@ -1825,29 +1984,12 @@ func test_summary() -> void:
 	check(scr.stage == 1 and scr.heaters.any(func(h): return h.p == scorer), "a tap anywhere: he heated up, so the HOT reveal")
 	scr.tap(Vector2(10, 10))
 	check(scr.stage == 1, "a second tap straight away can't skip a stage")
+	var wk := c.week
 	scr.t = 0.5
 	scr.tap(Vector2(10, 10))
-	check(scr.stage == 2, "another tap skips the reveal: the conference results")
-	scr.t = 2.0
-	scr.tap(Vector2(10, 10))
-	check(scr.stage == 3, "another tap: UP NEXT")
-	scr.t = 0.0
-	check(scr.cr_shown() == scr.cr_before, "UP NEXT starts from the CR before the game")
-	scr.t = 0.36 * 1.6 + 0.4
-	var mid_cr: int = scr.cr_shown()
-	check(mid_cr >= scr.cr_before and mid_cr <= scr.cr_after, "...counts up as the bar fills (%d)" % mid_cr)
-	scr.t = 2.0
-	check(scr.cr_shown() == scr.cr_after and scr.cr_after == c.wallet(), "...and ends on the CR now (%d)" % scr.cr_after)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	scr.tap(Vector2(2, 2))
-	check(Game.current_name == "game_summary", "on UP NEXT, only CONTINUE continues")
-	check(scr.cont_rect.size.x > 0.0, "CONTINUE is on screen")
-	var wk := c.week
-	scr.tap(scr.cont_rect.get_center())
-	await get_tree().process_frame
-	await get_tree().process_frame
-	check(Game.current_name == "postgame_review", "CONTINUE goes on to the POSTGAME REVIEW")
+	check(Game.current_name == "player_development", "another tap skips the reveal: straight on to PLAYER DEVELOPMENT (no POLO POINTS stage)")
 	# UP NEXT named the game that really comes next (later this week, or next week)
 	if not c.has_game():
 		c.end_week()
@@ -1858,20 +2000,22 @@ func test_summary() -> void:
 		var real_opp: String = mg.a if mg.h == c.school else mg.h
 		check(c.week >= wk and c.week <= wk + 1 and real_opp == String(nxt.opp) and (mg.h == c.school) == bool(nxt.home),
 			"UP NEXT was the real next game (%s)" % String(nxt.opp))
-	# week one is non-conference: the whole country's results
+	# week one is non-conference: COLLEGE WATER POLO has the whole country's results, the postgame none
 	Game.career = Career.new_game("WAGN", "A", "B", 58)
 	var c3 := Game.career
 	check(c3.has_game() and not bool(c3.my_game().get("c", true)), "week one opens with a non-conference game")
 	if c3.has_game() and not bool(c3.my_game().get("c", true)):
-		var day := int(c3.my_game().d)
 		var st3 := MatchState.new()
 		st3.score = [2, 4]
 		c3.last_summary = c3.finish_my_game(st3.box(c3.team()))
 		Game.goto("game_summary")
 		await get_tree().process_frame
 		var s3 = Game.current_screen
-		check(s3.league_title == "AROUND COLLEGE WATER POLO" and s3.league.size() == c3.cur().games.filter(func(gg): return int(gg.d) == day).size() - 1,
-			"a non-conference game: AROUND COLLEGE WATER POLO, every other game that day")
+		check(not ("league" in s3), "a non-conference game: no AROUND COLLEGE WATER POLO in the postgame")
+		var played: Array = c3.cur().games.filter(func(gg): return gg.r != null)
+		var nat: Array = load("res://src/ui/screens/news.gd").national(c3)
+		check(nat.size() == played.size() and played.all(func(gg): return nat.has(gg)),
+			"COLLEGE WATER POLO: every game played so far this week (%d)" % nat.size())
 		check(not s3.won and s3.bits.size() > 0, "a loss gets its blue drift")
 	Game.goto("title")
 	await get_tree().process_frame
@@ -2691,7 +2835,7 @@ func test_gameplay() -> void:
 		tt += 1.0 / 30.0
 		if cg.holder != catcher or cg.over:
 			break
-		if absf(cg.catch_glow() - ShotModel.catch_shoot(cg.catch_t)) > 0.0001:
+		if absf(cg.catch_glow() - ShotModel.catch_shoot(cg.catch_t, cg.cs_k)) > 0.0001:
 			matched = false
 		if absf(tt - 0.7) < 0.02:
 			at_07 = cg.catch_glow()
@@ -3012,15 +3156,15 @@ func test_career(seasons: int) -> void:
 const SPEC_SCHOOLS := {
 	"CULA": ["Los Angeles Bears", "California University–Los Altos", "Los Altos, California", "Blue / Gold"],
 	"CUSC": ["Los Angeles Spartans", "California University–Sacramento Coast", "Sacramento, California", "Cardinal / Gold"],
-	"STAM": ["Stanford Redwoods", "Santa Teresa Agriculture & Medicine", "Santa Teresa, California", "Cardinal Red / White"],
-	"ALC": ["Berkeley Golden Grizzlies", "Academy of Learning California", "Berkeley, California", "Navy / Gold"],
+	"STAM": ["Pacific Grove Redwoods", "Santa Teresa Agriculture & Medicine", "Santa Teresa, California", "Cardinal Red / White"],
+	"ALC": ["Bayview Golden Grizzlies", "Academy of Learning California", "Berkeley, California", "Navy / Gold"],
 	"FORDU": ["Bronx Lambs", "Ford Riverdale University", "Bronx, New York", "Maroon / White"],
 	"ICU": ["Irvine Aardvarks", "Irvine Coastal University", "Irvine, California", "Blue / Gold"],
-	"PRIN": ["Princeton Bengals", "Pricetown Ridge Institute of New Jersey", "Princeton, New Jersey", "Orange / Black"],
+	"PRIN": ["New Jersey Bengals", "Pricetown Ridge Institute of New Jersey", "Princeton, New Jersey", "Orange / Black"],
 	"CUSD": ["San Diego Sea Kings", "California University–San Diego", "San Diego, California", "Navy / Gold"],
 	"LMMU": ["Los Angeles Mountain Lions", "Los Marina Memorial University", "Los Marina, California", "Crimson / Navy"],
 	"LBSC": ["Long Beach Barracudas", "Long Beach Shoreline College", "Long Beach, California", "Black / Gold"],
-	"UPAC": ["Stockton Bengals", "University of Pacific Athletic Coast", "Stockton, California", "Orange / Black"],
+	"UPAC": ["Stockton Scorpions", "University of Pacific Athletic Coast", "Stockton, California", "Orange / Black"],
 	"UCDS": ["Davis Mustangs", "University of California–Davis State", "Davis, California", "Blue / Gold"],
 	"PPCU": ["Malibu Breakers", "Pepper Pacific Coast University", "Malibu, California", "Blue / Orange"],
 	"CCSB": ["Santa Barbara Bulls", "California College–Santa Barbara", "Santa Barbara, California", "Blue / Gold"],
@@ -3036,7 +3180,7 @@ const SPEC_SCHOOLS := {
 	"BUCK": ["Lewisburg Buffalo", "Buffalo Creek University", "Lewisburg, Pennsylvania", "Orange / Blue"],
 	"HURST": ["Erie Lakehawks", "Harbor University of Regional Science & Technology", "Erie, Pennsylvania", "Green / White"],
 	"WAGN": ["Staten Island Hawks", "Waterfront Academy of Greater New York", "Staten Island, New York", "Green / White"],
-	"GWU": ["Washington Patriots", "Georgetown Waterfront University", "Washington, D.C.", "Buff / Blue"],
+	"GWU": ["Washington Sentinels", "Georgetown Waterfront University", "Washington, D.C.", "Buff / Blue"],
 	"MSMU": ["Emmitsburg Highlanders", "Maryland Summit Mountain University", "Emmitsburg, Maryland", "Blue / White"],
 	"IONA": ["New Rochelle Irish", "Institute of Northern Academics", "New Rochelle, New York", "Maroon / Gold"],
 	"LIUB": ["Brooklyn Hammerheads", "Long Island Brooklyn University", "Brooklyn, New York", "Blue / Gold"],
@@ -3972,7 +4116,7 @@ func test_screens() -> void:
 	Game.current_screen._continue()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	check(Game.current_name == "postgame_review", "the POSTGAME REVIEW comes after the summary")
+	check(Game.current_name == "player_development", "PLAYER DEVELOPMENT comes after the summary")
 	check(c.week == wk, "the week isn't over until you leave the postgame")
 	var lk = Game.current_screen
 	for _i in 3:
@@ -5057,7 +5201,7 @@ func test_moments() -> void:
 		for ch in cd.choices:
 			all.append(ch.effects)
 		check(Moments.fill(String(cd.text), c.team().roster[0]).replace(CreditCoin.TAG, "").find("{") < 0, "card %s fills its names" % cd.id)
-	for i in 400:
+	for i in (400 if not all.is_empty() else 0):
 		var p: PoloPlayer = c.team().roster[i % c.team().roster.size()]
 		c.apply_effects(all[i % all.size()], p)
 		check(LockerData.chips(all[i % all.size()]).size() >= 0, "chips")
@@ -5083,5 +5227,5 @@ func test_moments() -> void:
 					cards += 1
 			c2.queue.clear()
 	print("  in 3 x 10 weeks: %d cards" % cards)
-	check(cards >= 1 and not "pick_press" in Moments.new(), "cards turn up (the press conference is gone)")
+	check(cards == 0 and not "pick_press" in Moments.new(), "no weekly cards turn up (all removed; the press conference is gone)")
 	Game.career = null

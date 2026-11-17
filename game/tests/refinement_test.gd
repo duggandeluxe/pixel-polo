@@ -21,10 +21,10 @@ func _pro_grant() -> void:
 	Store.reset_for_tests()
 	Store._inflight = Store.PRO_ID
 	Store._on_purchased(Store.PRO_ID, "txn-pro")
-	r.check(Store.pro and Store.vault == 500, "59: a new purchase grants 500")
+	r.check(Store.pro and Store.vault == Store.PRO_COINS and Store.PRO_COINS == 200, "59: a new purchase grants 200")
 	Store._on_purchased(Store.PRO_ID, "txn-pro")
 	Store._on_owned(Store.PRO_ID)
-	r.check(Store.vault == 500, "...once")
+	r.check(Store.vault == 200, "...once")
 	# a reinstall: the store file's gone, and it's a restore
 	Store.reset_for_tests()
 	Store._on_owned(Store.PRO_ID)
@@ -41,7 +41,7 @@ func _pro_grant() -> void:
 	Store.hold_owned = false
 	Store._inflight = Store.PRO_ID
 	Store._on_purchased(Store.PRO_ID, "txn-4")
-	r.check(Store.vault == 500, "a reset and a re-purchase don't pay again")
+	r.check(Store.vault == 0, "a reset removes PRO's coins and a re-purchase doesn't pay them again")
 	# owners before this update (no coins, flagged)
 	var s := {"v": 0, "bank": CoinVault.new(), "old": CoinVault.new(), "looks": VisualUpgrades.new(), "pro": true, "pro_coins": false}
 	EconomyMigration.run(s)
@@ -50,9 +50,9 @@ func _pro_grant() -> void:
 	# the coin packs: into the shared vault
 	Store._inflight = "blue_100"
 	Store._on_purchased("blue_100", "txn-5")
-	r.check(Store.vault == 500, "43: the old 100 pack lands as 500 Yellow Coins")
+	r.check(Store.vault == 60, "43: the Starter Pack (blue_100) lands as 60 Polo Points")
 	Store._on_purchased("blue_100", "txn-5")
-	r.check(Store.vault == 500, "...once")
+	r.check(Store.vault == 60, "...once")
 	Store.reset_for_tests()
 
 func _text(n: Node) -> String:
@@ -84,50 +84,24 @@ func _screens() -> void:
 	await _frames()
 	var hub := _text(Game.current_screen).to_upper()
 	r.check(Game.current_screen.find_child("Cards", true, false).get_child_count() == 8, "4: the Hub's eight cards")
-	# the lower divisions hibernated (Colleges.ENABLE_LOWER_DIVISIONS): no pack in the shop at all
-	Game.goto("store", {}, false)
-	await _frames()
-	var hid := _text(Game.current_screen).to_upper()
-	r.check(Game.current_screen.find_child("Divisions", true, false) == null and not hid.contains("DIVISION"), "hibernated: the shop lists no division pack, nor mentions one")
-	# ...and with them back, the shop as it was
-	Colleges.lower_divisions = true
 	Game.goto("store", {}, false)
 	await _frames()
 	var shop := _text(Game.current_screen)
 	r.check(Game.current_screen.find_child("CoinPacks", true, false).get_child_count() == 4, "48: four coin packs")
-	r.check(Game.current_screen.find_child("Division_div2", true, false) != null and Game.current_screen.find_child("Division_div3", true, false) != null, "50, 51: both division cards")
 	r.check(not shop.to_upper().contains("BLUE") and not shop.to_upper().contains("BUY NOW"), "37, 53: no Blue Coins, nothing to buy on them")
-	for id in ["Division_div2", "Division_div3"]:
-		r.check(_buttons(Game.current_screen.find_child(id, true, false)) == 0, "53: %s has no button" % id)
-	Colleges.lower_divisions = Colleges.ENABLE_LOWER_DIVISIONS
 	Game.goto("visual_shop", {}, false)
 	await _frames()
 	var vs := _text(Game.current_screen).to_upper()
 	r.check(not vs.contains("COSMETIC") and not vs.contains("EXCHANGE") and not vs.contains("BLUE"), "38: no Cosmetic Packs or Coin Exchange tabs")
-	Game.goto("upgrade_detail", {"cat": "replay"}, false)
-	await _frames(4)
-	var rp := _text(Game.current_screen)
-	r.check(rp.contains("PREVIEW REPLAY") and rp.contains("UNLOCK INSTANT REPLAY") and Game.current_screen.find_child("Tier_1", true, false) == null, "17: one purchase card, PREVIEW REPLAY")
+	r.check(not vs.contains("INSTANT REPLAY") and Game.current_screen.find_child("Upgrade_replay", true, false) == null, "17: Instant Replay is gone from Visual Upgrades")
 	Game.goto("upgrade_detail", {"cat": "broadcast"}, false)
 	await _frames(4)
 	r.check(Game.current_screen.find_child("Tier_3", true, false) != null and Game.current_screen.find_child("Tier_4", true, false) == null, "22: no Level 4 card")
-	Game.goto("upgrade_detail", {"cat": "victory"}, false)
-	await _frames(4)
-	r.check(Game.current_screen.find_child("Tier_4", true, false) != null, "34: all four victories on the page")
+	r.check(VisualUpgrades.cat("victory").is_empty(), "34: no Victory Presentation upgrade (and no win presentation at all)")
 	Game.goto("recruiting", {}, false)
 	await _frames()
 	r.check(Game.current_screen.find_child("RosterNeeds", true, false) == null and not _text(Game.current_screen).contains("TEAM NEEDS"),
 		"68-71: the recruiting screen has no TEAM NEEDS strip (removed)")
-	Game.goto("new_career", {}, false)
-	await _frames()
-	var nc := _text(Game.current_screen).to_upper()
-	r.check(not nc.contains("DIVISION") and Game.current_screen.find_child("DivisionFilters", true, false) == null,
-		"hibernated: New Dynasty is Division I's alone, no division filter or mention")
-	Colleges.lower_divisions = true
-	Game.goto("new_career", {}, false)
-	await _frames()
-	r.check(_text(Game.current_screen).to_upper().contains("DIVISION II"), "56: New Dynasty offers the divisions (with them back)")
-	Colleges.lower_divisions = Colleges.ENABLE_LOWER_DIVISIONS
 	win.size = size
 	Game.career = null
 

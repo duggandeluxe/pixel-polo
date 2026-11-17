@@ -97,22 +97,25 @@ func _lab() -> void:
 	r.check(counts.empty == [0, 0] and counts.weekly[1] == 0 and counts.weekly[0] == 5 and counts.one == [0, 1] and counts.national[1] == 7, "the arrangements are what they say (%s)" % str(counts))
 	r.check(counts.max[0] == 24 and counts.max[1] == 13 and counts.legacy[0] == 0 and counts.legacy[1] == 3, "...the maxed-out room and an older save's (%s)" % str(counts))
 	r.check(Game.career == c and JSON.stringify(c.to_dict()) == before, "the loaded career is exactly as it was")
-	# the way out: title > settings > lab > room > back, back, back: the title, never round again
+	# the way out: title > settings > DEV > lab > room > back x4: the title, never round again
 	Game.history.clear()
 	Game.goto("title")
 	await _frames(1)
 	Game.goto("settings")
+	await _frames(1)
+	DevGate.try_unlock("8008")   # (Settings' DEV button and its code)
+	Game.goto("dev_settings")
 	await _frames(1)
 	Game.goto("record_lab")
 	await _frames(2)
 	Game.current_screen.open_room("max")
 	await _frames(2)
 	var path: Array = []
-	for i in 3:   # (a fourth would be the title's Back: quit)
+	for i in 4:   # (a fifth would be the title's Back: quit)
 		Game.current_screen.on_back()
 		await _frames(2)
 		path.append(Game.current_name)
-	r.check(path == ["record_lab", "settings", "title"], "Back from a preview room leads out: %s" % str(path))
+	r.check(path == ["record_lab", "dev_settings", "settings", "title"], "Back from a preview room leads out: %s" % str(path))
 	Game.goto("title")
 	await _frames(1)
 

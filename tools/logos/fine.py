@@ -13,19 +13,23 @@ import small
 BOXES = [("fs", 30, 18), ("fm", 42, 30)]
 ## Where the faithful reduction turns to noise even at this density (chosen side by side): the
 ## dedicated small variant, as logos_full.py does at the coarser sizes.
-SMALL_VARIANTS = {"SJCU": ("fs", "fm"), "CCSB": ("fs", "fm"), "SMCC": ("fs",), "LBSC": ("fs",), "CULA": ("fs",)}
-OUTLINES = {"MSMU": (253, 253, 253)}   # (logos_full.py: its navy edge vanishes on the navy panels)
-RING_HINTS = {"CCSB": (252, 185, 16)}
+SMALL_VARIANTS = {"SJCU": ("fs", "fm"), "CULA": ("fs",), "ICU": ("fs", "fm"), "PPCU": ("fs", "fm"), "PRIN": ("fs",), "CUSD": ("fs",), "LBSC": ("fs",), "NANA": ("fs",), "CCSB": ("fs",), "HVRD": ("fs",), "UPAC": ("fs",), "CRBU": ("fs",), "UCDS": ("fs",), "CSFU": ("fs",), "USAF": ("fs",), "SCCU": ("fs",), "GWU": ("fs",), "STAM": ("fs",), "CUSC": ("fs",), "BUCK": ("fs",), "HURST": ("fs",), "LIUB": ("fs",), "IONA": ("fs",), "MSMU": ("fs",), "WAGN": ("fs",)}
+OUTLINES = {}   # (logos_full.py: Emmitsburg's old navy EH had one; its Highlander brings its own)
+## Colours to reduce an original to before matching (10 unless named): the leprechaun needs more
+## or its gold shamrock merges into its skin.
+PALETTE = {"IONA": 16, "WAGN": 24, "HURST": 24}
+RING_HINTS = {"ICU": (252, 209, 82), "PPCU": (255, 128, 16), "PRIN": (252, 97, 1)}
 
 def flatten(path):
+    colors = PALETTE.get(os.path.basename(path)[:-4], 10)
     """An original's opaque pixels as its own few colours: (index map, palette)."""
     a = np.asarray(Image.open(path).convert("RGBA")).astype(np.int32)
     fg = a[..., 3] > 127
     pix = a[fg][:, :3]
     rng = np.random.default_rng(1)
     sub = pix[rng.choice(len(pix), min(len(pix), 200000), replace=False)].astype(np.uint8)
-    q = Image.fromarray(sub.reshape(-1, 1, 3)).quantize(colors=10, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-    pal = np.array(q.getpalette()[:30]).reshape(-1, 3)
+    q = Image.fromarray(sub.reshape(-1, 1, 3)).quantize(colors=colors, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    pal = np.array(q.getpalette()[:3 * colors]).reshape(-1, 3)
     idx = np.asarray(q).reshape(-1)
     counts = np.bincount(idx, minlength=len(pal))
     keep = [i for i in np.argsort(-counts) if counts[i] > 0.004 * len(idx)]
@@ -80,7 +84,8 @@ def main(src, out):
         flat, P = flatten(os.path.join(src, f))
         for tag, bw, bh in BOXES:
             if tag in SMALL_VARIANTS.get(id, ()):
-                im = small.small(flat, P, bw, bh, RING_HINTS.get(id))
+                body = small.main_piece(flat) if id in small.MAIN_ONLY else flat
+                im = small.small(body, P, bw, bh, RING_HINTS.get(id))
             elif id in OUTLINES:
                 im = outlined(sample(flat, P, bw - 2, bh - 2), OUTLINES[id])
             else:

@@ -190,10 +190,8 @@ func _real_goal() -> void:
 			cheer = cheer or g.hero.cheer > 0.5
 			hopped = hopped or g.hero.hop > 1.0
 			slump = slump or (g.keeper != null and g.keeper.slump > 0.5)
-			var hy: float = ms.view.to_screen(g.hero.pos).y
-			var top: float = g.top if g.top >= 0.0 else g.place(ms.get_viewport_rect().size, ms.view)
-			if hy - 20.0 < top + g.block_h() and hy + 4.0 > top:
-				covered = true
+			if g.top >= 0.0 and g.top != GoalShow.TEXT_TOP:
+				covered = true   # (moved: it must sit at the one screen-space spot every goal)
 			if g.t - GoalShow.CELEBRATE_AT > 0.3:
 				for m in g.mates:
 					if absf(m.pos.x - g.hero.pos.x) > 0.3 and m.facing != signf(g.hero.pos.x - m.pos.x):
@@ -210,7 +208,7 @@ func _real_goal() -> void:
 	r.check(max_zoom > 1.03 and max_zoom < 1.12, "the camera pushes in a little (%.3f)" % max_zoom)
 	r.check(cheer and hopped, "TEST 8: the scorer's fist goes up and he bounces")
 	r.check(slump, "TEST 7: the beaten keeper's arms drop")
-	r.check(not covered, "the GOAL! block never covers the scorer (it sat at %d px)" % int(g.top))
+	r.check(not covered and g.place() == GoalShow.TEXT_TOP, "the GOAL! block sits at the same screen spot every goal (%d px)" % int(g.top))
 	r.check(mates_face, "his mates nearby turn to him (%d of them)" % g.mates.size())
 	r.check(clock_ok, "TEST 5: the game clock and shot clock stand still through the show")
 	r.check(not board_early, "TEST 4: the goal isn't counted while the show's on")
@@ -451,6 +449,70 @@ static func shots(runner: Node, out: String) -> void:
 			Engine.time_scale = 1.0
 			if f.phase == MatchFlow.Phase.FINAL:
 				break
+	Engine.time_scale = 1.0
+	DisplayServer.window_set_size(Vector2i(1440, 810))
+
+## The quarter-break scoreboards (END OF 1ST QUARTER, HALFTIME, END OF 3RD QUARTER, a long name)
+## and GOAL! from every kind of play at both ends of the pool, at three screen shapes. Prints
+## where the GOAL! block sat each time: it must be the same spot, every time.
+##   godot --path game -- --test break_png <outdir>
+static func break_shots(runner: Node, out: String) -> void:
+	DirAccess.make_dir_recursive_absolute(out)
+	var tree := runner.get_tree()
+	var spots := {}
+	for shape in [[Vector2i(1440, 810), "169"], [Vector2i(1752, 810), "phone"], [Vector2i(1080, 810), "43"]]:
+		DisplayServer.window_set_size(shape[0])
+		await tree.create_timer(0.3).timeout
+		var them := League.make_team(0)
+		if shape[1] == "phone":
+			them.name = "Northern Pennsylvania Mountain Lions"   # (a club keeps its whole name: the longest case)
+		var cfg := {"us": League.make_team(3), "them": them, "seed": 11, "minutes": 3.0, "autoplay": true}
+		Game.match_cfg = cfg
+		Game.goto("match", cfg)
+		await tree.create_timer(0.4).timeout
+		var ms = Game.current_screen
+		var f: MatchFlow = ms.flow
+		# GOAL! from each kind of play, yours (their goal, on the right) and theirs (yours, on the left)
+		for v in [["half", Play.Kind.HALF_COURT, 0, false], ["counter", Play.Kind.COUNTER, 0, false],
+				["penalty", Play.Kind.PENALTY, 0, false], ["six_on_five", Play.Kind.HALF_COURT, 0, true],
+				["theirs", Play.Kind.HALF_COURT, 1, false], ["theirs_counter", Play.Kind.COUNTER, 1, false]]:
+			f.state.quarter = 1 + (spots.size() % 3)
+			f.state.clock = 200.0
+			if v[2] == 0:
+				f._start_attack(v[1])
+			else:
+				f._start_defense(v[1])
+			await tree.process_frame
+			var p: Play = f.play
+			if v[3]:
+				p.man_up = Play.MAN_UP_TIME
+			ms.view.zoom = 1.0 + 0.04 * (spots.size() % 3)
+			p._finish("goal", "GOAL!", {"scorer": p.attackers[mini(1 + spots.size() % 4, p.attackers.size() - 1)].player})
+			Engine.time_scale = 0.25
+			await _wait(tree, func(): return ms.goal_show.active() and ms.goal_show.t >= 1.15)
+			var cam: Vector2 = ms.view.to_screen(ms.goal_show.hero.pos) if ms.goal_show.hero != null else Vector2(-1, -1)
+			spots["%s_%s" % [shape[1], v[0]]] = ms.goal_show.top
+			print("  GOAL! %s %s: block top %.1f px (scorer on screen at %s, zoom %.3f)" % [shape[1], v[0], ms.goal_show.top, str(cam.round()), ms.view.zoom])
+			await _shot(runner, out, "goal_%s_%s" % [shape[1], v[0]])
+			Engine.time_scale = 6.0
+			await _wait(tree, func(): return not ms.goal_show.active())
+			Engine.time_scale = 1.0
+		# the three breaks
+		for q in [1, 2, 3]:
+			f.state.quarter = q
+			f.state.score = [[3, 2], [7, 7], [12, 9]][q - 1]
+			f._quarter_end()
+			await tree.create_timer(0.3).timeout
+			await _shot(runner, out, "break_%s_q%d" % [shape[1], q])
+			var sc_before: String = str(f.state.score)
+			ms._press(Vector2(4, 4), 0)   # the real tap: continue
+			print("  break Q%d %s: tap -> %s, Q%d, score %s (was %s)" % [q, shape[1], "ON" if f.phase != MatchFlow.Phase.BREAK else "STUCK",
+				f.state.quarter, str(f.state.score), sc_before])
+			await tree.process_frame
+	var tops := {}
+	for k in spots:
+		tops[spots[k]] = true
+	print("GOAL! block tops seen: %s (%s)" % [str(tops.keys()), "ONE SPOT" if tops.size() == 1 else "MOVED"])
 	Engine.time_scale = 1.0
 	DisplayServer.window_set_size(Vector2i(1440, 810))
 

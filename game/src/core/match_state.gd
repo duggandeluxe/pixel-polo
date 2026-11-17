@@ -151,7 +151,8 @@ func box(us: PoloTeam, them: PoloTeam = null) -> Dictionary:
 	var out := {"score": [score[0], score[1]], "so": [shootout[0], shootout[1]] if in_shootout else [],
 		"uid": uid, "won": winner() == 0, "goals": goal_by[0], "assists": assist_by[0], "steals": steal_by[0], "blocks": block_by[0],
 		"excl_drawn": excl_drawn_by[0], "keeper": us.keeper(), "saves": saves[0], "played": appeared[0].duplicate() if not appeared[0].is_empty() else us.starters(), "pen_fouls": pen_by[0], "pf": pf.duplicate(),
-		"turnovers": turnover_by[0], "excl": excl_by[0], "pen_drawn": pen_drawn_by[0], "keeper_steals": keeper_steal_by[0]}
+		"turnovers": turnover_by[0], "excl": excl_by[0], "pen_drawn": pen_drawn_by[0], "keeper_steals": keeper_steal_by[0],
+		"shots": shot_by[0]}   # (every shot in play by whoever took it, subs too: the development sheet's S and %)
 	if them != null:
 		out["lines"] = [player_lines(0, us), player_lines(1, them)]
 		# their side's recorded events too, for their players' XP (Development)

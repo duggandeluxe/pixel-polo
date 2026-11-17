@@ -37,7 +37,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 func run_all() -> void:
 	results = RefinementChecks.run_all(12)

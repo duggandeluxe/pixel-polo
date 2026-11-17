@@ -1,15 +1,12 @@
 class_name CreditCoin
 extends RefCounted
-## THE CREDIT COIN (the Golden Credits update): the official golden water polo coin, drawn after
-## every Coaching Credits amount, number first: "35 (coin)", "+8 (coin)". Amounts anywhere in the
-## game go through here, so it's the same coin everywhere.
+## THE POLO POINT (PP): Pixel Polo's one currency, drawn after every amount, number first:
+## "35 (coin)", "+8 (coin)". Amounts anywhere in the game go through here, so it's the same coin
+## everywhere. (The class keeps its old name; the save data and Wallet never changed.)
 ##
-## The art is the provided image, kept as it is: assets/ui/credit_coin.png is its native pixel
-## grid on a transparent background (tools/make_credit_coin.py, from the original), and every
-## size below is made from that source alone with nearest-neighbour sampling (SIZES: each one
-## its own file, never one shrunk from another), drawn unfiltered at whole pixels, never
-## stretched or cropped. The coin is allowed to stand taller than the number beside it.
-##
+## The art is pixel art made here (P_COIN): a gold coin with a darker-gold rim, a lit upper-left,
+## a shaded lower-right and a pixel P in the middle. One drawing, 10 px; 20 px and up it's the
+## same drawing at 2x (nearest, whole pixels, never filtered), so it stays crisp at every size.
 ##   texture(px)            the coin `px` tall (the nearest size made, never bigger than asked)
 ##   draw_amount(ci, ...)   "NUMBER coin" on a canvas, vertically centred on a line
 ##   amount_w(...)          how wide that is
@@ -18,9 +15,21 @@ extends RefCounted
 ##                          message); rich() and every place such text is shown turn TAG into
 ##                          the coin, so the number always comes first and the coin right after
 
-const DIR := "res://assets/ui/"
-const SOURCE := "res://assets/ui/credit_coin.png"
-## The sizes made from the source (px tall): rows and buttons, headings, the big reward panels.
+## The coin's pixels: E the darker-gold rim, H highlight, G gold, S shade, P the letter.
+const P_COIN := [
+	"..EEEEEE..",
+	".EHHHHHGE.",
+	"EHHPPPGGSE",
+	"EHGPGGPGSE",
+	"EHGPPPGGSE",
+	"EGGPGGGGSE",
+	"EGGPGGGSSE",
+	"EGGGGGSSSE",
+	".ESSSSSSE.",
+	"..EEEEEE..",
+]
+const P_COLORS := {"E": "a8650f", "H": "fff2a8", "G": "ffd23f", "S": "e0a526", "P": "8a4f06"}
+## The sizes asked for around the game (px tall). Under 20 the coin is its 10 px drawing; 20 and up 2x.
 const SIZES := [16, 20, 24, 32, 48]
 const GAP := 2                 # between the number and the coin
 ## Where an amount's coin goes in text: "35" + TAG.
@@ -31,24 +40,26 @@ static var _ART := RegEx.create_from_string("\\{coin\\}|\\{stars:([0-9.]+)\\}")
 
 static var _cache := {}
 
-## The coin `px` tall: the largest made size that isn't bigger than `px` (the smallest at least).
+## The coin `px` tall: the 10 px drawing, or 2x from 20 px up (never bigger than asked).
 static func texture(px: int = 16) -> Texture2D:
-	var size: int = SIZES[0]
-	for s in SIZES:
-		if s <= px:
-			size = s
-	if _cache.has(size):
-		return _cache[size]
-	var path := "%scredit_coin_%d.png" % [DIR, size]
-	var tex: Texture2D = null
-	if ResourceLoader.exists(path):
-		tex = load(path)
-	elif ResourceLoader.exists(SOURCE):
-		tex = load(SOURCE)
-	else:
-		tex = Deck.coin_texture()   # (only until the official art is in the project)
-	_cache[size] = tex
+	var scale := 2 if px >= 20 else 1
+	if _cache.has(scale):
+		return _cache[scale]
+	var tex := ImageTexture.create_from_image(image(scale))
+	_cache[scale] = tex
 	return tex
+
+## The coin's pixels at `scale` (whole pixels, transparent around it).
+static func image(scale: int = 1) -> Image:
+	var n: int = P_COIN.size()
+	var img := Image.create(n * scale, n * scale, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	for y in n:
+		var row: String = P_COIN[y]
+		for x in row.length():
+			if P_COLORS.has(row[x]):
+				img.fill_rect(Rect2i(x * scale, y * scale, scale, scale), Color(P_COLORS[row[x]]))
+	return img
 
 ## The size a coin is drawn at (its texture's own height, whole pixels).
 static func height(px: int = 16) -> int:
@@ -118,9 +129,9 @@ static func widget_text(n_text: String, size: int = 8, col: Color = UI.GOLD, px:
 static func tag(n: int, sign: bool = false) -> String:
 	return text(n, sign) + TAG
 
-## `t` without its coins, for where no picture can go (a tooltip): "35 credits".
+## `t` without its coins, for where no picture can go (a tooltip): "35 PP".
 static func plain(t: String) -> String:
-	return norm(t).replace(TAG, " credits")
+	return norm(t).replace(TAG, " PP")
 
 ## `t` with its tags as TAG (text put in capitals has "{COIN}").
 static func norm(t: String) -> String:
@@ -147,7 +158,7 @@ static func set_button(b: Button, t: String, px: int = 16) -> Button:
 ## Text that may hold amounts (TAG): a plain Label when it has none; else a RichTextLabel with the
 ## coin set in the line, centred on it, at whole pixels. `width` > 0 wraps it at that width.
 static func rich(t: String, size: int = 8, col: Color = UI.TEXT, font: String = "body", width: float = 0.0, px: int = 16) -> Control:
-	t = norm(t)
+	t = norm(Loc.t(t))   # (the player's LANGUAGE, before the text is cut up round its coins)
 	if not t.contains(TAG) and not t.contains("{stars:"):
 		var l := UI.label(t, size, col, font)
 		if width > 0.0:

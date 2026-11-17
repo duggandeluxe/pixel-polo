@@ -56,12 +56,7 @@ static func generate(c: Career) -> void:
 		_weekly(c, on, season, k, weeks, rng)
 		var champs := _tournaments(c, on, season, k, rng)
 		_national(c, on, season, k, rng)
-		var past := {"season": season, "conf": champs.conf, "nat": champs.nat}
-		if String(champs.get("d3", "")) != "":
-			past["d3"] = champs.d3
-		if champs.conf.has(Colleges.D2_CONF):
-			past["d2"] = champs.conf[Colleges.D2_CONF]
-		c.legacy.append(past)
+		c.legacy.append({"season": season, "conf": champs.conf, "nat": champs.nat})
 	# every current player with a past award: his profile kept, so his records still open him
 	# after he's gone (as a real award keeps one: ConfAwards.player_of)
 	var won := {}
@@ -199,28 +194,19 @@ static func _tournaments(c: Career, on: Array, season: String, k: int, rng: Rand
 	cs.sort()
 	for cf in cs:
 		if (confs[cf] as Array).size() < 2:
-			continue   # (a one-school conference has no tournament: the NWPC)
+			continue   # (a one-school conference has no tournament)
 		var ranked := _ranked_teams(confs[cf], strength, rng)
 		conf_champs[cf] = ranked[0]
 		finals[cf] = ranked.slice(0, 2)
 		_tourney_awards(c, by_team, ranked.slice(0, 2), "conf:" + cf, cf, season, k)
-	# the NCSA's field: Division I and the one Division II champion; Division III has its own
-	var field: Array = conf_champs.values().filter(func(id): return Colleges.division(String((c.teams[id] as PoloTeam).conf)) != Colleges.D3)
-	var rest: Array = by_team.keys().filter(func(id): return not id in field and Colleges.division(String((c.teams[id] as PoloTeam).conf)) == Colleges.D1)
+	# the NCSA's field: the conference champions, then the strongest of the rest
+	var field: Array = conf_champs.values()
+	var rest: Array = by_team.keys().filter(func(id): return not id in field)
 	rest.sort_custom(func(a, b): return float(strength[a]) > float(strength[b]))
 	field.append_array(rest.slice(0, NAT_TEAMS - field.size()))
 	var nat := _ranked_teams(field, strength, rng)
 	_tourney_awards(c, by_team, nat.slice(0, 2), "nat", "", season, k)
-	var d3: Array = by_team.keys().filter(func(id): return Colleges.division(String((c.teams[id] as PoloTeam).conf)) == Colleges.D3)
-	var d3_champ := ""
-	if d3.size() >= Schedule.D3_FIELD:
-		var four: Array = conf_champs.values().filter(func(id): return id in d3)
-		d3.sort_custom(func(a, b): return float(strength[a]) > float(strength[b]))
-		for id in d3:
-			if four.size() < Schedule.D3_FIELD and not id in four:
-				four.append(id)
-		d3_champ = String(_ranked_teams(four, strength, rng)[0])
-	return {"conf": conf_champs, "nat": nat[0], "d3": d3_champ}
+	return {"conf": conf_champs, "nat": nat[0]}
 
 static func _ranked_teams(ids: Array, strength: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var luck := {}

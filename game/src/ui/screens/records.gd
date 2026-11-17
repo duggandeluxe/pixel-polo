@@ -143,8 +143,21 @@ func _team(v: VBoxContainer) -> void:
 	# the SCHOOL RECORD BOOK's team marks
 	var sb := UI.vbox(ROW_GAP)
 	_head(sb, "SCHOOL RECORD BOOK")
-	_table(sb, Records.school_book(c, c.school), TEAM_KEYS, COLS_SCHOOL)
+	_table(sb, Records.school_book(c, c.school), TEAM_KEYS, _team_cols())
 	v.add_child(_panel(sb, "SchoolBook"))
+
+## The SCHOOL RECORD BOOK's columns: the school book's whole width, RECORD just wide enough for
+## its longest name and VALUE a little narrower, so HOLDER (a coach, a whole game) gets the rest.
+func _team_cols() -> Array:
+	var total := 0
+	for col in COLS_SCHOOL:
+		total += int(col[1])
+	var rec := 0
+	for k in TEAM_KEYS:
+		rec = maxi(rec, ceili(Deck.text_w(String(Records.NAMES[k]), 8, "caps")) + 4)
+	rec = mini(rec, int(COLS_SCHOOL[0][1]))
+	var yr := int(COLS_SCHOOL[3][1])
+	return [["RECORD", rec], ["VALUE", 34], ["HOLDER", total - rec - 34 - yr], ["YEAR", yr]]
 
 # ------------------------------------------------------------------ the books
 ## A book's records in a panel a group (a game, a season, a career).
@@ -180,15 +193,21 @@ func _table(v: VBoxContainer, book: Dictionary, keys: Array, cols: Array) -> voi
 		h.add_child(_cell(Records.NAMES[k], int(cols[0][1]), UI.TEXT))
 		var mine: bool = String(r.team) == c.school and str(r.year).length() > 4
 		h.add_child(_cell(str(int(r.v)), int(cols[1][1]), UI.GOLD, true))
-		h.add_child(_cell(String(r.name), int(cols[2][1]), UI.GOLD if mine else UI.TEXT))
+		if cols.size() == 4 and k in Records.TEAM_KEYS:
+			# a team mark: its coach or its whole game, wrapped (never cut) inside its column
+			var hl := UI.label(Records.holder_text(c, k, r), 8, UI.GOLD if mine else UI.TEXT, "caps")
+			hl.name = "Holder"
+			hl.custom_minimum_size = Vector2(int(cols[2][1]), 0)
+			hl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			h.add_child(hl)
+		else:
+			h.add_child(_cell(String(r.name), int(cols[2][1]), UI.GOLD if mine else UI.TEXT))
 		var i := 3
 		if cols.size() == 5:
 			h.add_child(_cell(Colleges.team_name(String(r.team)), int(cols[3][1]), UI.DIM))
 			i = 4
 		h.add_child(_cell(str(r.year), int(cols[i][1]), UI.DIM))
 		v.add_child(h)
-	if cols == COLS_SCHOOL and keys == TEAM_KEYS:
-		v.add_child(UI.label("GOLD HOLDER: SET BY YOUR PROGRAM.", 8, UI.DIM, "caps"))
 
 # ------------------------------------------------------------------ SEASON AWARDS
 ## The post-season awards, newest season first, a panel each: the season's awards (Awards), then

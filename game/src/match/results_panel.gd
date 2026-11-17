@@ -87,9 +87,7 @@ func draw(ci: CanvasItem, size: Vector2, st: MatchState, us: PoloTeam, them: Pol
 		if t < SCORE_AT:
 			continue
 		var pop := clampf((t - SCORE_AT) / 0.1, 0.0, 1.0)
-		var score := str(st.score[side])
-		if st.in_shootout:
-			score += " (%d)" % st.shootout[side]
+		var score := Schedule.side_text(st.score, st.shootout if st.in_shootout else [], side)
 		UI.text(ci, Vector2(cx - W / 4.0, y0 + 109), score, int(lerpf(36.0, 28.0, pop)),
 			YELLOW if win == side else UI.TEXT, "big", HORIZONTAL_ALIGNMENT_CENTER, W / 2.0)
 		if not records.is_empty():
@@ -133,9 +131,8 @@ func _draw_buttons(ci: CanvasItem, x0: float, y: float, actions: Array) -> Array
 		var b := Rect2(bx, roundf(y), bw, BTN_H)
 		var primary := i == n - 1
 		var label: String = labels[i][0]
-		ci.draw_rect(b, YELLOW if primary else BTN_NAVY)
-		if not primary:
-			ci.draw_rect(b, UI.BORDER, false, 1.0)
+		# the game's raised button face (cut corners, the bevel): the same look as every menu button
+		Deck.frame(ci, b, YELLOW if primary else BTN_NAVY, UI.BORDER if not primary else UI.INK, false, UI.BEVEL_RAISED)
 		var col := NAVY if primary else UI.TEXT
 		var tw := UI.text_width(label, 8, "caps")
 		var tx := roundf(b.position.x + (bw - tw - (8.0 if i == 0 else 0.0)) / 2.0)

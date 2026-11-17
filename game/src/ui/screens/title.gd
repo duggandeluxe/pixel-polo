@@ -68,19 +68,31 @@ func _ready() -> void:
 	for i in menu.get_child_count():
 		Juice.enter(menu.get_child(i), i)
 	var ins := safe_insets()
+	# (help and gear placed by offsets from their corners, which hold in every LANGUAGE: a
+	# position set before the button is on screen takes its direction from the language alone,
+	# and in Arabic, Hebrew or Urdu would land mirrored, off the screen)
 	var help := Deck.icon_button("help", func(): Game.goto("howto"), 26, 22)
 	help.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	help.position = Vector2(EDGE + ins.x, EDGE + ins.y)
+	help.offset_left = EDGE + ins.x
+	help.offset_top = EDGE + ins.y
+	help.offset_right = help.offset_left + 26
+	help.offset_bottom = help.offset_top + 22
 	add_child(help)
 	var gear := Deck.icon_button("gear", func(): Game.goto("settings"), 26, 22)
 	gear.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	gear.position = Vector2(-26 - EDGE - 1 - ins.z, EDGE + ins.y)   # 1 more for the drop shadow
+	gear.offset_left = -26 - EDGE - 1 - ins.z   # 1 more for the drop shadow
+	gear.offset_top = EDGE + ins.y
+	gear.offset_right = gear.offset_left + 26
+	gear.offset_bottom = gear.offset_top + 22
 	add_child(gear)
 	var ver := UI.label("v" + str(ProjectSettings.get_setting("application/config/version")), 8, UI.DIM)
-	ver.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	ver.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ver.position = Vector2(-20, -13 - ins.w)
-	ver.custom_minimum_size = Vector2(40, 0)
+	ver.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	ver.offset_left = -20
+	ver.offset_right = 20
+	ver.offset_top = -13 - ins.w
+	ver.offset_bottom = ver.offset_top + 9
 	add_child(ver)
 	Sfx.music("menu")
 	Sfx.crowd(0.0)

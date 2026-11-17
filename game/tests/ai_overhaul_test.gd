@@ -35,6 +35,15 @@ func run(runner) -> void:
 	_t17_defense()
 	_t18_keeper_physics()
 
+## Some of run()'s check groups only, by name (to run the slow suite in parallel processes):
+##   godot --headless --path game -- --test ai_overhaul_part _t9_decisions_differ _t16_offense
+static func part(runner, names: Array) -> void:
+	var t = load("res://tests/ai_overhaul_test.gd").new()
+	t.r = runner
+	for n in names:
+		print("AI overhaul: " + String(n))
+		t.call(String(n))
+
 # ------------------------------------------------------------------ helpers
 func _keeper(v: float = 5.0, vals: Dictionary = {}) -> PoloPlayer:
 	var a := {"com": v, "lun": v, "blk": v, "leg": v}
@@ -323,8 +332,8 @@ func _t4_keeper_attributes() -> void:
 # ------------------------------------------------------------------ 5. close range
 func _t5_close_range() -> void:
 	var k := _keeper()
-	var far := _keeper_trial(k, 0.5, PERIMETER, 3000, 51)
-	var near := _keeper_trial(k, 0.5, CLOSE, 3000, 51)
+	var far := _keeper_trial(k, Difficulty.BASELINE, PERIMETER, 3000, 51)   # (the keeper as first tuned: EASY since the re-tier)
+	var near := _keeper_trial(k, Difficulty.BASELINE, CLOSE, 3000, 51)
 	print("  sensible aim, medium keeper: perimeter goal %.2f (right way %.2f), close goal %.2f (right way %.2f)" % [far.goal, far.right, near.goal, near.right])
 	r.check(float(near.goal) > float(far.goal) + 0.04, "a close-range look is clearly more dangerous than a perimeter one")
 	r.check(float(near.goal) < 0.92, "...but not an automatic goal")
@@ -587,8 +596,8 @@ func _t11_dynamic() -> void:
 	var top: Array = climb.call([{"m": 9, "gap": 0.0}, {"m": 9, "gap": 0.0}, {"m": 9, "gap": 0.0}, {"m": 9, "gap": 0.0}, {"m": 9, "gap": 0.0}, {"m": 9, "gap": 0.0}], 0.98)
 	var bottom: Array = climb.call([{"m": -9, "gap": 0.0}, {"m": -9, "gap": 0.0}, {"m": -9, "gap": 0.0}, {"m": -9, "gap": 0.0}, {"m": -9, "gap": 0.0}, {"m": -9, "gap": 0.0}], 0.02)
 	r.check(top.all(func(x): return x[1] <= 1.0) and bottom.all(func(x): return x[1] >= 0.0), "always 0.0 .. 1.0")
-	r.check(Difficulty.DYN_START == 0.5 and is_equal_approx(Difficulty.value("gk_read", 0.25), lerpf(Difficulty.PARAMS.gk_read.x, Difficulty.PARAMS.gk_read.y, 0.5)),
-		"starts at 0.50, and in-between levels are the lines between EASY, MEDIUM and HARD")
+	r.check(Difficulty.DYN_START == 0.25 and is_equal_approx(Difficulty.value("gk_read", 0.25), lerpf(Difficulty.PARAMS.gk_read.x, Difficulty.PARAMS.gk_read.y, 0.5)),
+		"starts at 0.25 (between EASY and MEDIUM), and in-between levels are the lines between EASY, MEDIUM and HARD")
 	# the matchup comes from attributes, never stars or team overall
 	var a := League.make_team(1, 4)
 	var b := League.make_team(1, 4)
@@ -647,9 +656,10 @@ func _t12_locked_in_match() -> void:
 		levels["career %.3f" % c.dyn_ai] = true
 	Game.career = was
 	print("  levels seen through a match: %s" % str(levels.keys()))
-	r.check(levels.keys().all(func(k): return String(k).ends_with("%.3f" % level) or String(k).begins_with("your defence 0.500")),
+	var mates := "your defence %.3f" % Difficulty.TEAMMATES
+	r.check(levels.keys().all(func(k): return String(k).ends_with("%.3f" % level) or String(k).begins_with(mates)),
 		"the level is the one set at kick-off all match: goals, quarters, penalties and comebacks change nothing")
-	r.check(levels.has("your defence 0.500"), "your own AI defenders play at MEDIUM whatever the level")
+	r.check(levels.has(mates), "your own AI defenders play at TEAMMATES (the game as first tuned) whatever the level")
 
 # ------------------------------------------------------------------ 13. your keeper
 ## KeeperDuel as it was before the overhaul at NORMAL (the old formulas, written out).
@@ -761,7 +771,7 @@ func _t15_saves() -> void:
 	r.check(same, "...every player's attributes untouched")
 	d.erase("dyn_level")
 	var older := Career.from_dict(JSON.parse_string(JSON.stringify(d)))
-	r.check(is_equal_approx(older.dyn_ai, Difficulty.DYN_START), "no dynamic data at all: it starts at 0.50")
+	r.check(is_equal_approx(older.dyn_ai, Difficulty.DYN_START), "no dynamic data at all: it starts at 0.25")
 	# the new fields survive a save
 	old.difficulty = "hard"
 	old.dyn_ai = 0.65
@@ -778,6 +788,25 @@ func _t15_saves() -> void:
 	var fresh: Node = load("res://src/autoload/game.gd").new()
 	r.check(String(fresh.settings.difficulty) == "normal", "MEDIUM is the default for a new player")
 	fresh.free()
+	# a NEW DYNASTY starts at DYNAMIC, whatever the device's pick and whichever school
+	var dev := String(Game.settings.difficulty)
+	var all_dyn := true
+	for dm in ["easy", "normal", "hard"]:
+		Game.settings.difficulty = dm
+		for sid in ["CULA", "ALC", "BUCK"]:
+			Difficulty.reset_new_career()
+			all_dyn = all_dyn and Career.new_setup(600).begin(sid, "A", "B").difficulty == "dynamic"
+	r.check(all_dyn, "a new dynasty starts at DYNAMIC (every device pick, every school)")
+	Difficulty.reset_new_career()
+	Difficulty.pick_new_career("hard")
+	var picked := Career.new_setup(601).begin("CULA", "A", "B")
+	r.check(picked.difficulty == "hard" and Difficulty.new_career_mode() == "dynamic",
+		"...a pick on the New Career screen is that career's, and the next new one is DYNAMIC again")
+	var kept := Career.from_dict(JSON.parse_string(JSON.stringify(picked.to_dict())))
+	r.check(kept.difficulty == "hard" and Career.from_dict(JSON.parse_string(JSON.stringify(back.to_dict()))).difficulty == "dynamic"
+		and Career.from_dict(JSON.parse_string(JSON.stringify(c.to_dict()))).difficulty == c.difficulty,
+		"...and every save keeps its own pick when loaded (never reset to DYNAMIC)")
+	Game.settings.difficulty = dev
 
 # ------------------------------------------------------------------ 16. their offence
 ## Whole matches, the same teams and seeds, the opposing offence at each level: how good a look

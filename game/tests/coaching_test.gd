@@ -119,21 +119,21 @@ func _selection() -> void:
 	_scr().pick(F.M_DROP)
 	await _frames(1)
 	r.check(_node("Drop_%d" % F.M_DROP).get_meta("selected") and not _node("Drop_%d" % F.FIVE_DROP).get_meta("selected"), "T2: M-DROP highlighted, alone")
-	r.check((_node("ActiveGameplan") as Label).text == "ACTIVE GAMEPLAN: M-DROP", "T2: ACTIVE GAMEPLAN: M-DROP")
+	r.check(_node("ActiveGameplan") == null and _node("Playbook").formation == F.M_DROP, "T2: no ACTIVE GAMEPLAN line; the playbook draws M-DROP")
 	r.check(_roundtrip(c).gameplan == F.M_DROP, "T2: saved with the career")
 	r.check((_node("DropText") as Label).text == DefenseFormation.DROP_TEXT[F.M_DROP], "T2: its description")
 	_scr().pick(F.FOUR_FIVE)
 	await _frames(1)
 	var sel := DefenseFormation.DROPS.filter(func(f): return _node("Drop_%d" % f).get_meta("selected"))
 	r.check(sel == [F.FOUR_FIVE], "T2: 4-5 DROP highlighted, M-DROP no longer")
-	r.check((_node("ActiveGameplan") as Label).text == "ACTIVE GAMEPLAN: 4-5 DROP" and c.gameplan == F.FOUR_FIVE, "T2: ACTIVE GAMEPLAN updated")
+	r.check(_node("Playbook").formation == F.FOUR_FIVE and c.gameplan == F.FOUR_FIVE, "T2: the playbook follows the pick")
 	_scr().pick(F.PRESS)
 	r.check(c.gameplan == F.FOUR_FIVE, "T2: PRESS can't be the gameplan")
 	Game.goto("hub")
 	await _frames(2)
 	Game.goto("coaching")
 	await _frames(2)
-	r.check((_node("ActiveGameplan") as Label).text == "ACTIVE GAMEPLAN: 4-5 DROP", "T2: still there after leaving Coaching")
+	r.check(_node("Playbook").formation == F.FOUR_FIVE, "T2: still there after leaving Coaching")
 
 # ------------------------------------------------------------------ 3: scouting
 func _scout() -> void:
@@ -197,7 +197,7 @@ func _scout() -> void:
 	r.check(JSON.stringify(opp.to_dict()) == before and c.wallet() == cr, "T3: looking changes nobody, costs nothing (his lineup untouched)")
 	_scr().on_back()
 	await _frames(2)
-	r.check(Game.current_name == "coaching" and c.gameplan == F.THREE_FOUR and (_node("ActiveGameplan") as Label).text.ends_with("3-4 DROP"),
+	r.check(Game.current_name == "coaching" and c.gameplan == F.THREE_FOUR and _node("Playbook").formation == F.THREE_FOUR,
 		"T3 / Scout 27: back to Coaching, the gameplan kept")
 	# the next opponent moves on with the schedule
 	c.sim_my_game()
@@ -215,21 +215,21 @@ func _scout() -> void:
 	c.week = wk
 
 # ------------------------------------------------------------------ 4: recruiting
-## Coaching's RECRUITING panel: the season's signings and the projected roster, then up to three
-## incoming recruits, each opening his own profile on the Recruiting screen.
+## Coaching's RECRUITING panel: the season's signings and the projected roster, then every
+## incoming recruit (up to Recruiting.SIGN_MAX), each opening his own profile on the Recruiting screen.
 func _recruiting() -> void:
 	var c := _career(44)
 	c.credits = 500
 	var hs: Array = c.market.duplicate()
 	hs.sort_custom(func(a, b): return (a.p as PoloPlayer).id < (b.p as PoloPlayer).id)
-	for x in hs.slice(0, 3):
+	for x in hs.slice(0, Recruiting.SIGN_MAX):
 		r.check(Recruiting.sign(c, x) == "", "(sign)")
 	Game.goto("coaching")
 	await _frames(2)
 	var rows: Array = _node("Targets").get_children().filter(func(n): return n.name.begins_with("Target_"))
-	r.check(rows.size() == 3, "T4: Coaching shows the three signed")
+	r.check(rows.size() == Recruiting.SIGN_MAX, "T4: Coaching shows all %d signed (%d)" % [Recruiting.SIGN_MAX, rows.size()])
 	var st: Label = _node("RecruitingStatus")
-	r.check(st != null and st.text.contains("SIGNED 3 / %d" % Recruiting.SIGN_MAX) and st.text.contains("PROJECTED %d / %d" % [Recruiting.projected(c), c.roster_max()]),
+	r.check(st != null and st.text.contains("SIGNED %d / %d" % [Recruiting.SIGN_MAX, Recruiting.SIGN_MAX]) and st.text.contains("PROJECTED %d / %d" % [Recruiting.projected(c), c.roster_max()]),
 		"T4: signings and the projected roster (%s)" % (st.text if st else ""))
 	UI.drawn_log = []
 	_node("RecruitingPanel").propagate_call("queue_redraw")
@@ -282,7 +282,7 @@ func _first_half() -> void:
 	ms._process(DT)
 	await _frames(1)
 	var rects: Array[Rect2] = ms.fbar.rects
-	r.check(rects.size() == 2, "T5: two buttons on the bar")
+	r.check(rects.size() == 1, "T5: one button, CALL DROP")
 	var names := []
 	DefenseFormation.NAMES.map(func(n): names.append(n))
 	UI.drawn_log = []
@@ -290,15 +290,11 @@ func _first_half() -> void:
 	await _frames(2)
 	var drawn: Array = UI.drawn_log
 	UI.drawn_log = null
-	r.check(drawn.has("PRESS") and drawn.has("5 DROP") and not drawn.has("M-DROP") and not drawn.has("4-5 DROP") and not drawn.has("3-4 DROP"),
-		"T5: PRESS | 5 DROP, no other drop shown")
-	for i in 2:
-		ms.flow._start_defense(Play.Kind.HALF_COURT)
-		ms._process(DT)
-		await _frames(1)
-		var at: Vector2 = ms.fbar.rects[i].get_center()
-		ms.fbar.press(at, ms.flow)
-		r.check(ms.flow.play.formation == [F.PRESS, F.FIVE_DROP][i] and ms.flow.play.formation_locked, "T5: a tap on button %d calls %s" % [i, ["PRESS", "5 DROP"][i]])
+	r.check(drawn.has("CALL DROP") and not drawn.has("PRESS") and not drawn.has("5 DROP") and not drawn.has("M-DROP") and not drawn.has("4-5 DROP") and not drawn.has("3-4 DROP"),
+		"T5: CALL DROP, no PRESS, no drop's name")
+	r.check(ms.flow.play.formation == F.PRESS and not ms.flow.play.formation_locked, "T5: the possession starts in the normal defence, not called")
+	ms.fbar.press(ms.fbar.rects[0].get_center(), ms.flow)
+	r.check(ms.flow.play.formation_locked and (ms.flow.play.formation == F.FIVE_DROP or ms.flow.play.drop_pending == F.FIVE_DROP), "T5: CALL DROP calls Coaching's drop, 5 DROP")
 	r.check(c.gameplan == F.FIVE_DROP, "T5: the match never touches Coaching's pick")
 	Game.goto("title")
 	await _frames(1)
@@ -488,7 +484,7 @@ func _default_kept() -> void:
 	r.check(c.gameplan == F.FOUR_FIVE and _roundtrip(c).gameplan == F.FOUR_FIVE, "T11: after the game Coaching still has 4-5 DROP")
 	Game.goto("coaching")
 	await _frames(2)
-	r.check((_node("ActiveGameplan") as Label).text == "ACTIVE GAMEPLAN: 4-5 DROP", "T11: ACTIVE GAMEPLAN: 4-5 DROP")
+	r.check(_node("Playbook").formation == F.FOUR_FIVE, "T11: the playbook shows 4-5 DROP")
 	# the next match: a fresh halftime decision, from Coaching's drop again
 	var ms2 = await _career_match(c)
 	r.check(ms2.flow.drop == F.FOUR_FIVE and not ms2.flow.adjusted, "T11: the next match starts on 4-5 DROP, a new halftime decision to make")
@@ -582,8 +578,10 @@ func _layout_at(label: String, headless: bool) -> void:
 		_scr().pick(f)
 		await _frames(2)
 		var desc: Label = _node("DropText")
-		r.check(desc.get_global_rect().end.y < _node("ActiveGameplan").get_global_rect().position.y + 0.5 and view.encloses(_node("ScoutOpponent").get_global_rect()),
-			"T14 %s: %s's description fits, SCOUT OPPONENT on screen" % [label, DefenseFormation.NAMES[f]])
+		var book := _node("Playbook") as Control
+		var scout := _node("ScoutOpponent") as Control
+		r.check(desc.get_global_rect().end.y < book.get_global_rect().position.y + 0.5 and book.get_global_rect().end.y < scout.get_global_rect().position.y + 0.5 			and book.size.y >= 60.0 and view.encloses(scout.get_global_rect()),
+			"T14 %s: %s's description and playbook fit, SCOUT OPPONENT on screen" % [label, DefenseFormation.NAMES[f]])
 	Game.goto("scout")
 	await _frames(3)
 	var board: Control = _node("Board")
@@ -633,10 +631,18 @@ static func shots(runner, out: String) -> void:
 	var c := Career.new_game("GWU", "Sam", "Rivera", 31)
 	c.queue.clear()
 	c.hot_tip = true
-	c.credits = 200
+	c.credits = 500
 	Game.career = c
-	Recruiting.sign(c, c.market[0])
-	Recruiting.sign(c, c.market[1])
+	for i in Recruiting.SIGN_MAX:
+		Recruiting.sign(c, c.market[i])   # (a full class: the panel lists all four)
+	c.gameplan = DefenseFormation.F.FOUR_FIVE
+	for f in DefenseFormation.DROPS:   # the playbook, each drop
+		c.gameplan = f
+		Game.goto("coaching")
+		await tree.create_timer(0.4).timeout
+		await RenderingServer.frame_post_draw
+		runner.get_viewport().get_texture().get_image().save_png(out.path_join("c_book_%s.png" % String(DefenseFormation.NAMES[f]).replace(" ", "")))
+		print("  shot playbook ", DefenseFormation.NAMES[f])
 	c.gameplan = DefenseFormation.F.FOUR_FIVE
 	for shot in [["coaching", "c_coaching"], ["scout", "c_scout"]]:
 		Game.goto(String(shot[0]))

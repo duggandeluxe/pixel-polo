@@ -126,11 +126,14 @@ func _attributes() -> void:
 	for i in 5:
 		PlayerForm.push_grade(q, PlayerForm.BAD)
 	r.check(q.heat == 0 and is_equal_approx(Attributes.hot_bonus(q), 0.0), "A/F31: the stars go, the bonus goes with them")
-	# the profile never shows the boosted number
+	# the profile never shows the boosted number. (Since the attribute bar's HOT fire, player.gd
+	# reads hot_bonus, but only as the bar's fire layer, Deck.attr_boxes' "fire": the boxes and the
+	# #/10 stay his permanent attribute, checked by --test bar_fx.)
 	for path in ["res://src/ui/screens/player.gd", "res://src/ui/screens/roster.gd", "res://src/ui/deck.gd", "res://src/ui/screens/recruiting.gd"]:
 		var s := FileAccess.get_file_as_string(path)
-		r.check(not s.contains("hot_bonus") and not s.contains("Attributes.effective") and not s.contains("play_value") and not s.contains("HotFire"),
-			"A19/F18: %s shows permanent attributes only, no fire" % path.get_file())
+		var bonus_ok := not s.contains("hot_bonus") or path.get_file() == "player.gd"
+		r.check(bonus_ok and not s.contains("Attributes.effective") and not s.contains("play_value") and not s.contains("HotFire"),
+			"A19/F18: %s shows permanent attributes only (the bonus only as the bar's fire)" % path.get_file())
 
 # ------------------------------------------------------------------ 17 the game reads them
 func _gameplay() -> void:
@@ -345,7 +348,7 @@ func _fire() -> void:
 	r.check(_rects(func(): HotFire.draw_ball_fire(null, view, b, 1.0, s, -1, false)).is_empty(), "R: the ball in a hot man's hand has no fire")
 	# not in menus
 	for path in ["res://src/ui/portrait.gd", "res://src/ui/hot_reveal.gd", "res://src/ui/screens/scout.gd", "res://src/ui/screens/trophy_room.gd",
-			"res://src/ui/screens/coach_event.gd", "res://src/ui/screens/postgame_review.gd", "res://src/ui/screens/title.gd", "res://src/ui/screens/awards.gd"]:
+			"res://src/ui/screens/coach_event.gd", "res://src/ui/screens/player_development.gd", "res://src/ui/screens/title.gd", "res://src/ui/screens/awards.gd"]:
 		r.check(not FileAccess.get_file_as_string(path).contains("HotFire"), "R: no Hot Star art in %s" % path.get_file())
 	# light
 	var t0 := Time.get_ticks_usec()
@@ -367,7 +370,8 @@ func _dev_lab() -> void:
 	c.queue.clear()
 	Game.career = c
 	Game.settings.dev_mode = true
-	Game.goto("settings")
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings")
 	await _frames(3)
 	var names := ["FormLab", "TempoLab", "AttrLab", "HotLab", "FxLab", "DefenseLab", "RecordLab", "CoachLab", "HotStarLab"]
 	var all := names.all(func(n): return _node(n) != null)

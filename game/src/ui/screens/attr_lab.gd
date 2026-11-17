@@ -44,7 +44,7 @@ func _ready() -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 ## Field player or goalkeeper: every attribute back to 5, every ceiling to 8.
 func set_kind(gk: bool) -> void:

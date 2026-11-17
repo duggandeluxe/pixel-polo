@@ -134,7 +134,7 @@ func _old_save() -> void:
 	_play(c, 2)
 	c.coach.titles = ["2025-26 MPSF", "2025-26 Big West", "2025-26 NCSA"]
 	c.add_news("CONFERENCE CHAMPIONS! Bronx Lambs win the MAWPC")
-	c.add_news("Princeton Bengals win the Northeast Collegiate Conference")   # (a save from between the two renames)
+	c.add_news("New Jersey Bengals win the Northeast Collegiate Conference")   # (a save from between the two renames)
 	c.queue.append({"type": "note", "title": "WCC preview", "text": "Finish top 3 in the NWPC", "lines": ["Big West next"]})
 	var d: Dictionary = c.to_dict()
 	var table := JSON.stringify(c.table)
@@ -142,7 +142,7 @@ func _old_save() -> void:
 	var back := Career.from_dict(JSON.parse_string(JSON.stringify(d)))
 	r.check(back.coach.titles == ["2025-26 Pacific Elite Conference", "2025-26 Golden Coast Conference", "2025-26 NCSA"], "T6: an old dynasty's titles in the new names %s" % str(back.coach.titles))
 	r.check(back.news.any(func(n): return String(n.t).ends_with("win the Atlantic Water Polo Conference")), "T6: ...its news too")
-	r.check(back.news.any(func(n): return String(n.t) == "Princeton Bengals win the Northeast Coast Conference") and not back.news.any(func(n): return "Collegiate" in String(n.t)), "NCC: Northeast Collegiate Conference in a save becomes Northeast Coast Conference")
+	r.check(back.news.any(func(n): return String(n.t) == "New Jersey Bengals win the Northeast Coast Conference") and not back.news.any(func(n): return "Collegiate" in String(n.t)), "NCC: Northeast Collegiate Conference in a save becomes Northeast Coast Conference")
 	var q: Dictionary = back.queue[-1]
 	r.check(q.title == "Western Water Polo Conference preview" and q.text == "Finish top 3 in the Northeast Coast Conference" and q.lines == ["Golden Coast Conference next"], "T6: ...and its inbox")
 	r.check(back.team().conf == "MAWPC" and JSON.stringify(back.table) == table and JSON.stringify(back.schedule) == sched, "T6: its conference, records and schedule as they were")

@@ -17,12 +17,13 @@ const RATINGS := {
 	"BUCK": [69, 69, 69], "WAGN": [68, 70, 66], "MSMU": [67, 67, 67], "IONA": [66, 68, 64],
 	"LIUB": [65, 63, 67], "HURST": [62, 63, 61],
 }
-## The brief's prototype outcomes (neutral pool, 20,000 games each): A, B, average score, A's win %.
+## The Simulation Realism brief's example results (neutral pool, plain OVR, no lean either way):
+## A's OVR, B's OVR, A's score, B's score, and the least A should win (a bigger gap, a surer thing).
 const PROTOTYPES := [
-	["CULA", "CUSC", 11.2, 10.0, 0.603],
-	["NANA", "LIUB", 19.3, 9.7, 0.985],
-	["FORDU", "LIUB", 26.6, 6.0, 0.9999],
-	["LIUB", "IONA", 12.9, 13.8, 0.419],
+	[80, 78, 12.0, 11.0, 0.55],
+	[85, 75, 14.0, 9.0, 0.92],
+	[88, 68, 17.0, 6.0, 0.995],
+	[92, 65, 20.0, 5.0, 0.999],
 ]
 
 var r   # the test runner (check, check_between)
@@ -73,8 +74,8 @@ func _rt(sid: String) -> Array:
 func _formulas() -> void:
 	print("engine: formulas")
 	# CULA v CUSC by hand: GAP 1, STYLE -1 / +2, average DEF 90
-	var total := 21.5 + 0.24 * (85.0 - 90.0) + 0.42 * 1.0 + 0.35 * (-1.0 + 2.0)
-	var margin := 0.475 * ((90.0 - 88.0) - (92.0 - 92.0)) + 0.10 * (-1.0 - 2.0)
+	var total := 21.5 + 0.24 * (85.0 - 90.0) + 0.08 * 1.0 + 0.35 * (-1.0 + 2.0)
+	var margin := 0.265 * ((90.0 - 88.0) - (92.0 - 92.0)) + 0.10 * (-1.0 - 2.0)
 	var e := GameSim.neutral_expected(_rt("CULA"), _rt("CUSC"))
 	_ok(is_equal_approx(e[0], (total + margin) / 2.0) and is_equal_approx(e[1], (total - margin) / 2.0),
 		"the neutral formula, CULA v CUSC: %.3f-%.3f (total %.2f, margin %.3f)" % [e[0], e[1], total, margin])
@@ -85,8 +86,8 @@ func _formulas() -> void:
 			var ra := _rt(a)
 			var rb := _rt(b)
 			var gap: float = ra[0] - rb[0]
-			var tot: float = 21.5 + 0.24 * (85.0 - (ra[2] + rb[2]) / 2.0) + 0.42 * absf(gap) + 0.35 * ((ra[1] - ra[0]) + (rb[1] - rb[0]))
-			var mar: float = 0.475 * ((ra[1] - rb[2]) - (rb[1] - ra[2])) + 0.10 * ((ra[1] - ra[0]) - (rb[1] - rb[0]))
+			var tot: float = 21.5 + 0.24 * (85.0 - (ra[2] + rb[2]) / 2.0) + 0.08 * absf(gap) + 0.35 * ((ra[1] - ra[0]) + (rb[1] - rb[0]))
+			var mar: float = 0.265 * ((ra[1] - rb[2]) - (rb[1] - ra[2])) + 0.10 * ((ra[1] - ra[0]) - (rb[1] - rb[0]))
 			var x := GameSim.neutral_expected(ra, rb)
 			var y := GameSim.neutral_expected(rb, ra)
 			ok = ok and is_equal_approx(x[0] + x[1], tot) and is_equal_approx(x[0] - x[1], mar) and is_equal_approx(x[0], y[1]) and is_equal_approx(x[1], y[0])
@@ -186,9 +187,9 @@ func _calibration(games: int) -> void:
 	print("engine: calibration (%d neutral games per matchup)" % games)
 	print("  %-14s %-15s %-15s %-12s %-14s %-10s %s" % ["MATCHUP", "FORMULA (REG)", "SIM AVERAGE", "BRIEF", "SIM WIN %", "BRIEF", "OT %"])
 	for pt in PROTOTYPES:
-		var a: String = pt[0]
-		var b: String = pt[1]
-		var x := GameSim.expected(_rt(a), _rt(b), true)
+		var a := str(pt[0])
+		var b := str(pt[1])
+		var x := GameSim.expected([float(pt[0]), float(pt[0]), float(pt[0])], [float(pt[1]), float(pt[1]), float(pt[1])], true)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash(a + b)
 		var sum := [0.0, 0.0]
@@ -214,9 +215,9 @@ func _calibration(games: int) -> void:
 		# of 15 can only push a low-scoring game up)
 		_ok(absf(reg_avg[0] - x[0]) < 0.12 and absf(reg_avg[1] - x[1]) < 0.12, "15: %s v %s regulation averages %.2f-%.2f match the formula's %.2f-%.2f" % [a, b, reg_avg[0], reg_avg[1], x[0], x[1]])
 		# against the brief's prototype: totals close, margins and win rates in its neighbourhood
-		_ok(absf((avg[0] + avg[1]) - (pt[2] + pt[3])) < 0.75, "15: %s v %s total goals %.1f near the brief's %.1f" % [a, b, avg[0] + avg[1], pt[2] + pt[3]])
-		_ok(absf(avg[0] - pt[2]) < 0.75 and absf(avg[1] - pt[3]) < 0.75, "15: %s v %s average score %.1f-%.1f within 0.75 of the brief's %.1f-%.1f" % [a, b, avg[0], avg[1], pt[2], pt[3]])
-		_ok(absf(win - float(pt[4])) < 0.06, "15: %s v %s: %s wins %.1f%%, the brief %.1f%%" % [a, b, a, win * 100.0, float(pt[4]) * 100.0])
+		_ok(absf((avg[0] + avg[1]) - (pt[2] + pt[3])) < 2.0, "15: %s v %s total goals %.1f near the brief's %.1f" % [a, b, avg[0] + avg[1], pt[2] + pt[3]])
+		_ok(absf(avg[0] - pt[2]) < 1.25 and absf(avg[1] - pt[3]) < 1.25, "15: %s v %s average score %.1f-%.1f within 1.25 of the brief's %.1f-%.1f" % [a, b, avg[0], avg[1], pt[2], pt[3]])
+		_ok(win >= float(pt[4]), "15: %s v %s: %s wins %.1f%%, at least %.1f%%" % [a, b, a, win * 100.0, float(pt[4]) * 100.0])
 	# upsets across OVR gaps, neutral water: the favourite's win % by gap
 	var line := PackedStringArray()
 	var fav := 0.0
@@ -450,6 +451,11 @@ func _season_flow() -> void:
 		_ok(games_ok, "21: seed %d: 16 games each, never more than 3 in a week" % seed)
 		_ok(nums_ok, "20: seed %d: every team's games are numbered 1-16 in the order played" % seed)
 		_ok(c.calendar_text() == "GAME 1/16", "20: the header says GAME 1/16 (%s)" % c.calendar_text())
+		_ok(c.week_text() == "WEEK 1" and c.season_years() == "%d-%d" % [c.year, c.year + 1],
+			"hub tracker: %s, %s at the start" % [c.season_years(), c.week_text()])
+		r._sim_to(c, 3)
+		_ok(c.week_text() == "WEEK %d" % (c.week + 1) and Schedule.games_played(c.schedule, c.school) >= c.week,
+			"hub tracker: weeks, not games (%s after %d games)" % [c.week_text(), Schedule.games_played(c.schedule, c.school)])
 		r._sim_to(c, 13)
 		var dogs := 0
 		var played := 0

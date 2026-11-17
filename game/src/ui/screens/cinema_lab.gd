@@ -6,20 +6,16 @@ extends BaseScreen
 ##   PLAY FULL             the whole entrance
 ##   DOORS / REVEAL / MATCHUP   that part, then it holds
 ##   TEST SKIP             plays, skips at 1.2 s: one hand-over, a second skip does nothing
-##   CLOSED .. FINAL       the stages frozen (closed, half-open, open, the doorway, the reveal,
-##                         the game's camera)
+##   HALLWAY .. FINAL      the stages frozen (Level 3's dark corridor, closed, half-open, open,
+##                         the doorway, the reveal, the game's camera). These and DOORS / REVEAL /
+##                         MATCHUP are on the doors' clock: at Level 3 they start after the corridor
 ##   MOTION: FULL / CALM   Reduce Motion's version (the lab's own: the setting stays)
-##   LEVEL 4: STARTING SEVEN SHOWCASE   the whole Level 4 entrance
-##   HOME 7 / AWAY 7       that team's graphic, then it holds
-##   LINEUP                the next bench man in for a home starter, through the team's own
-##                         lineup; the team is put back at once, only this preview shows him
-##   PORTRAITS             checks all 14 faces against the Roster's own pictures
 ##   FULL SIZE             the stage alone, at the game's own size (a tap brings the buttons back)
-##   LEVEL: n              the level everything above plays at
+##   LEVEL: n              the level everything above plays at (1 .. Pregame Presentation's top)
 ## Nothing is played, counted, spent or saved: no match, no season, no XP, no coins.
 
 const TYPES := ["REGULAR SEASON", "CONFERENCE TOURNAMENT", "NCSA CHAMPIONSHIP"]
-const STILLS := [["CLOSED", 0.3], ["HALF-OPEN", 1.15], ["OPEN", 1.7], ["DOORWAY", 2.3], ["REVEAL", 3.1], ["FINAL", 4.2]]
+const STILLS := [["HALLWAY", -0.7], ["CLOSED", 0.3], ["HALF-OPEN", 1.15], ["OPEN", 1.7], ["DOORWAY", 2.3], ["REVEAL", 3.1], ["FINAL", 4.2]]
 
 var teams: Array = []
 var home_i := 0
@@ -34,7 +30,6 @@ var part_end := -1.0              # a part's preview stops (holds) here
 var handovers := 0                # (TEST SKIP: how many times it handed over)
 var status := "PICK A PREVIEW"
 var level := 1
-var swaps := 0                    # LINEUP: how many bench men in (0: the real seven)
 var rows: Array = []              # the button rows (FULL SIZE hides them)
 var level_btn: Button
 
@@ -71,24 +66,19 @@ func _ready() -> void:
 	r1.add_child(motion_btn)
 	var r2 := _row()
 	r2.add_child(_btn("PLAY FULL", func(): play(0.0, -1.0), 70, "PlayFull", "primary"))
-	r2.add_child(_btn("DOORS", func(): play(0.4, 1.7), 56, "PreviewDoors"))
-	r2.add_child(_btn("REVEAL", func(): play(2.4, 3.9), 56, "PreviewReveal"))
-	r2.add_child(_btn("MATCHUP", func(): play(3.2, 4.0), 62, "PreviewMatchup"))
+	r2.add_child(_btn("DOORS", func(): play(at(0.4), at(1.7)), 56, "PreviewDoors"))
+	r2.add_child(_btn("REVEAL", func(): play(at(2.4), at(3.9)), 56, "PreviewReveal"))
+	r2.add_child(_btn("MATCHUP", func(): play(at(3.2), at(4.0)), 62, "PreviewMatchup"))
 	r2.add_child(_btn("TEST SKIP", test_skip, 66, "TestSkip"))
 	var r3 := _row()
 	for st in STILLS:
-		var at: float = st[1]
+		var st_at: float = st[1]
 		var nm: String = st[0]
-		r3.add_child(_btn(nm, func(): still(at, nm), 56, "Still" + nm.replace("-", "")))
+		r3.add_child(_btn(nm, func(): still(at(st_at), nm), 56, "Still" + nm.replace("-", "")))
 	var r4 := _row()
-	r4.add_child(_btn("LEVEL 4: STARTING SEVEN SHOWCASE", showcase, 170, "Showcase", "primary"))
-	r4.add_child(_btn("HOME 7", func(): seven(0), 44, "HomeSeven"))
-	r4.add_child(_btn("AWAY 7", func(): seven(1), 44, "AwaySeven"))
-	r4.add_child(_btn("LINEUP", change_lineup, 44, "ChangeLineup"))
-	r4.add_child(_btn("PORTRAITS", portraits, 52, "PortraitTest"))
 	r4.add_child(_btn("FULL SIZE", full_size, 50, "FullSize"))
 	level_btn = _btn("", func():
-		level = level % VisualUpgrades.MAX_LEVEL + 1
+		level = level % VisualUpgrades.top("pregame") + 1
 		_labels(), 44, "LabLevel", "ghost")
 	r4.add_child(level_btn)
 	_labels()
@@ -110,7 +100,7 @@ func _btn(text: String, cb: Callable, w: int, n: String, style := "normal") -> B
 func on_back() -> void:
 	Sfx.play("back")
 	Sfx.crowd(0.0)
-	Game.back("settings")
+	Game.back("dev_settings")
 
 func home() -> PoloTeam:
 	return teams[home_i]
@@ -135,74 +125,21 @@ func _labels() -> void:
 	motion_btn.text = "MOTION: %s" % ("CALM" if calm else "FULL")
 	level_btn.text = "LEVEL: %d" % level
 
+## A time `s` on the doors' clock as the entrance's own (after Level 3's corridor; never before 0).
+func at(s: float) -> float:
+	return maxf(0.0, s + PregameIntro.lead_for(level, calm))
+
 ## A fresh entrance for the picked schools (home on the left door).
 func make() -> PregameIntro:
 	var it := PregameIntro.new(home(), away(), true, TYPES[type_i], Colleges.venue_name(home().id))
 	it.calm = calm
-	var kept := home().lineup.duplicate()
-	if swaps > 0:
-		_swap_in(home())
 	it.set_level(level)
-	home().lineup = kept
 	var ev := PoolView.new()
 	ev.width = maxf(stage_cv.size.x, 120.0)
 	ev.height = maxf(stage_cv.size.y, 80.0)
 	ev.snap_to(Sprint.new(home(), away(), 0.0).focus())
 	it.end_view = ev
 	return it
-
-## The team's lineup with bench man number `swaps` in for a field starter (make() puts it back).
-func _swap_in(t: PoloTeam) -> void:
-	var seven := t.starters()
-	var bench := t.roster.filter(func(q: PoloPlayer): return not seven.has(q) and not q.is_keeper())
-	if bench.is_empty():
-		return
-	var ids: Array = []
-	for p: PoloPlayer in seven:
-		ids.append(p.id)
-	ids[1 + (swaps - 1) % 6] = (bench[(swaps - 1) % bench.size()] as PoloPlayer).id
-	t.lineup = ids
-
-## The complete Level 4 entrance.
-func showcase() -> void:
-	level = 4
-	_labels()
-	play(0.0, -1.0)
-
-## Team `i`'s Starting Seven, held when it's in.
-func seven(i: int) -> void:
-	level = 4
-	_labels()
-	var probe := make()
-	play(probe.seven_at(i), probe.seven_at(i) + PregameIntro.SHOW_TIME - 0.1)
-	status = "%s STARTING SEVEN" % ("HOME" if i == 0 else "AWAY")
-
-## The next bench man into the home seven, on the preview only.
-func change_lineup() -> void:
-	swaps += 1
-	level = 4
-	_labels()
-	var probe := make()
-	intro = probe
-	intro.t = probe.seven_at(0) + 1.0
-	intro.hold = intro.t
-	part_end = -1.0
-	var left: Array = home().starters().filter(func(p: PoloPlayer): return not probe.sevens[0].men.has(p))
-	status = "TEST LINEUP: %s OUT (THIS PREVIEW ONLY)" % (left[0] as PoloPlayer).last.to_upper() if not left.is_empty() else "NO BENCH MAN TO SWAP"
-
-## All 14 faces against the Roster's own: how many match.
-func portraits() -> int:
-	level = 4
-	_labels()
-	var it := make()
-	var same := 0
-	for s: Dictionary in it.sevens:
-		for p: PoloPlayer in s.men:
-			var col := Portrait.colors_ours(p, s.team)
-			if PregameIntro.face(p, s.team, Vector2i(52, 58)) == Portrait.texture(p, col[0], col[1]) and PregameIntro.face(p, s.team, Portrait.CARD_ZOOM) == Portrait.texture_zoomed(p, col[0], col[1], Portrait.CARD_ZOOM):
-				same += 1
-	status = "PORTRAITS: %d OF 14 ARE THE ROSTER'S OWN" % same
-	return same
 
 ## The stage alone, or the buttons back.
 func full_size() -> void:
@@ -235,7 +172,7 @@ func test_skip() -> void:
 	play(0.0, -1.0)
 	handovers = 0
 	status = "TEST SKIP: PLAYING..."
-	get_tree().create_timer(3.8 if level >= 4 else 1.2).timeout.connect(_do_skip)
+	get_tree().create_timer(1.2).timeout.connect(_do_skip)
 
 func _do_skip() -> void:
 	if intro == null:

@@ -19,7 +19,7 @@ func run(r) -> void:
 			var tex: Texture2D = load(path)
 			var b: Vector2i = TeamLogo.ART_BOXES[tag]
 			all = all and tex.get_width() * TeamLogo.FINE <= b.x + 0.01 and tex.get_height() * TeamLogo.FINE <= b.y + 0.01
-	r.check(n == 58, "29 schools, two fine files each (%d)" % n)
+	r.check(n == 60, "30 schools, two fine files each (%d)" % n)
 	r.check(all, "each fits the box its coarse file does")
 	var c := Career.new_game("GWU", "S", "H", 640)
 	c.queue.clear()

@@ -10,8 +10,9 @@ class_name Offseason
 ##               automatically, and a cut never refunds a credit.
 ##   finish:     your roster is legal: the players cut this off-season may be signed by AI
 ##               programs with places for them (_pickups); each AI program's empty places then get
-##               freshmen made for its prestige (Recruiting.ai_class), and walk-ons fill any short
-##               of seven (_ai_rosters); walk-ons fill yours to seven if it's short, every player's
+##               freshmen made for its prestige (Recruiting.ai_class), and walk-ons fill every place
+##               still empty (_ai_rosters, WalkOns); walk-ons fill yours the same way (announced:
+##               WELCOMING ALL WALK-ONS!, the queue's "walkons"), every player's
 ##               stars take in the year's development (PlayerForm.develop), and the next season
 ##               starts (its +15 credits and a new recruiting market: Career.start_season).
 
@@ -25,6 +26,9 @@ static func begin(c: Career) -> void:
 	_final_result(c)
 	var champion: String = c.season.get("champion", "")
 	TeamHonours.record_season(c)   # (the season's champions, kept for every program's trophy case)
+	for id in c.teams:   # (every player's season, kept for his FULL CAREER STATS)
+		for p in (c.teams[id] as PoloTeam).roster:
+			p.archive_season(c.season_label(), id)
 	if champion != "":
 		lines.append("NCSA champions: %s" % c.teams[champion].name)
 	lines.append("%s: %s, %s in the %s" % [me.name, c.record_text(), c.season.finish, c.conf_name()])
@@ -33,23 +37,35 @@ static func begin(c: Career) -> void:
 		prestige_before[id] = (c.teams[id] as PoloTeam).prestige
 	_prestige(c)
 	# awards and the season's records, before the seniors leave
-	lines.append_array(Awards.run(c, prestige_before))
-	for ln in Records.check_season(c):
+	var award_data := {}
+	lines.append_array(Awards.run(c, prestige_before, award_data))
+	var broken: Array = []   # (the records as data, for the season review: SeasonReview)
+	for e in Records.season_breaks(c):
+		var ln := String(e.line)
 		if ln.begins_with("NCSA") or ln.contains(c.school) or ln.begins_with("SCHOOL"):
 			lines.append(ln)
+			var prev: Dictionary = e.get("prev", {})
+			broken.append({"level": String(e.level), "key": String(e.key), "v": int(e.value), "name": String(e.holder), "team_name": String(e.team),
+				"prev": int(prev.get("v", 0)), "prev_name": String(prev.get("name", "")), "prev_year": str(prev.get("year", ""))})
 	c.coach.rep = clampi(int(c.coach.rep) + int(c.table[c.school].w) / 2 + (6 if c.school in c.season.conf_champs else 0) + (10 if champion == c.school else 0), 0, 100)
-	c.history.append({"year": c.season_label(), "team": c.school, "w": int(c.table[c.school].w), "l": int(c.table[c.school].l),
-		"cw": int(c.table[c.school].cw), "cl": int(c.table[c.school].cl), "rank": c.conf_rank(), "finish": c.season.finish,
-		"poll": Poll.rank_in(Poll.latest(c), c.school)})
 	var top := _top_scorer(me)
-	if top != null:
-		lines.append("Top scorer: %s, %d goals" % [top.short_name(), top.stat("g")])
 	var paid: Array = (c.season.get("credit_log", []) as Array)
 	var earned := 0
 	for e in paid:
 		earned += int(e[1])
-	lines.append("Credits earned this season: %s" % CreditCoin.tag(earned))
-	var recap := {"type": "recap", "title": "%s SEASON REVIEW" % c.season_label(), "lines": lines, "next": c.next_season_label()}
+	# what the season review shows that isn't kept anywhere else: the All-Conference team, the
+	# records as they were broken, your top scorer and the season's Polo Points (SeasonReview)
+	var review := {"all_conf": award_data.get("all_conf", []), "records": broken, "points": earned}
+	if top != null:
+		review["top"] = {"name": "%s %s" % [top.first, top.last], "pid": top.id, "g": top.stat("g")}
+	c.history.append({"year": c.season_label(), "team": c.school, "w": int(c.table[c.school].w), "l": int(c.table[c.school].l),
+		"cw": int(c.table[c.school].cw), "cl": int(c.table[c.school].cl), "rank": c.conf_rank(), "finish": c.season.finish,
+		"poll": Poll.rank_in(Poll.latest(c), c.school), "review": review})
+	if top != null:
+		lines.append("Top scorer: %s, %d goals" % [top.short_name(), top.stat("g")])
+	lines.append("Polo Points earned this season: %s" % CreditCoin.tag(earned))
+	var recap := {"type": "recap", "title": "%s SEASON REVIEW" % c.season_label(), "lines": lines, "next": c.next_season_label(),
+		"season": c.season_label()}
 	c.queue.append(recap)
 	# the coach's future: schools that want you after a good season (nobody fires you)
 	var offers := _offers(c, false)
@@ -63,6 +79,7 @@ static func transition(c: Career) -> void:
 	var lines: Array = []
 	var me := c.team()
 	var grads: Array = me.roster.filter(func(p: PoloPlayer): return p.year >= 4)
+	RosterReport.start(c, grads)   # (the roster set report writes down what happens: nothing more)
 	if not grads.is_empty():
 		lines.append("Graduated: " + ", ".join(grads.map(func(p): return p.short_name())))
 	for id in c.teams:
@@ -73,6 +90,8 @@ static func transition(c: Career) -> void:
 				for ln in Records.check_career(c, p, id):
 					if id == c.school or ln.begins_with("NCSA"):
 						lines.append(ln)
+					if id == c.school:
+						RosterReport.note(c, ln)
 				continue
 			_age(c, p, id == c.school)
 			stay.append(p)
@@ -86,6 +105,7 @@ static func transition(c: Career) -> void:
 		p.year = 1
 		p.schol = me.roster.filter(func(q: PoloPlayer): return q.schol).size() < Career.SCHOL_MAX
 		join(c, me, p)
+		RosterReport.add(c, "fresh", p)
 		signed.append("%s (%s, %s*)" % [p.short_name(), p.pos_text(), PlayerForm.star_text(p.stars)])
 	c.incoming = []
 	if not signed.is_empty():
@@ -138,6 +158,7 @@ static func cut(c: Career, p: PoloPlayer) -> String:
 	t.roster.erase(p)
 	t.sync_lineup()
 	c.cut_pool.append({"p": p, "from": c.school})   # (another program may sign him: _pickups)
+	RosterReport.add(c, "cuts", p)
 	c.add_news("Released: %s" % p.short_name())
 	(c.season.get("lock_lines", []) as Array).append("Cut: %s" % p.short_name())
 	return ""
@@ -151,26 +172,34 @@ static func finish_cuts(c: Career) -> String:
 	finish(c)
 	return ""
 
-## The roster is set: walk-ons to seven, the year's development, the report, the next season.
+## The roster is set: walk-ons to fill its places, the year's development, the report, the next season.
 static func finish(c: Career) -> void:
 	var me := c.team()
 	var lines: Array = c.season.get("lock_lines", [])
 	lines.append_array(_ai_rosters(c))
 	var had: Array = me.roster.duplicate()
-	var walkons := _fill(c, me, Career.ROSTER_MAX)
+	# OPEN TRYOUTS (WalkOns): every empty place filled, at the walk-on odds, no potential; then a
+	# legal lineup's shape however the roster stood (_fill: never expected with the places free)
+	var joined: Array = WalkOns.fill(c, me)
+	_fill(c, me, 0)
+	joined = me.roster.filter(func(q: PoloPlayer): return not q in had)
+	var walkons := joined.size()
 	me.sync_lineup()
-	CollegeGen.hold_bench(me, me.roster.filter(func(q: PoloPlayer): return not q in had))   # (walk-ons only: never your signings)
 	if walkons > 0:
 		lines.append("%d walk-on%s joined to fill the roster" % [walkons, "" if walkons == 1 else "s"])
 	me.sync_lineup()
 	lines.append("Roster set: %d players, %d on scholarship" % [me.roster.size(), me.roster.filter(func(p: PoloPlayer): return p.schol).size()])
 	# the year's development shows in the stars, and next season's ratings come from them
 	var moved: Array = []
+	var dev: Array = []   # (the report's PLAYER DEVELOPMENT: your returning players, as develop moved them)
 	for id in c.teams:
 		for p: PoloPlayer in (c.teams[id] as PoloTeam).roster:
 			var d := PlayerForm.develop(p)
 			if id == c.school and absf(d) >= 0.01:
 				moved.append("%s %s*" % [p.short_name(), PlayerForm.star_text(p.stars)])
+			if id == c.school and p in had:
+				dev.append({"id": p.id, "first": p.first, "last": p.last, "pos": p.pos, "num": p.number,
+					"was": snappedf(p.stars - d, 0.01), "now": snappedf(p.stars, 0.01)})
 	if not moved.is_empty():
 		lines.append("Stars moved: " + ", ".join(moved))
 	# next season's ratings are simply the new roster's (PoloTeam.ratings): nothing to set. The
@@ -185,10 +214,21 @@ static func finish(c: Career) -> void:
 	# (OFF and DEF in stars, as every screen shows them: PoloTeam.rating_stars)
 	lines.append("%s ratings: OVR %d (%+d), OFF %s, DEF %s, GK %d (%+d)" % [c.next_season_label(), shown.call(0, after), shown.call(0, after) - shown.call(0, before),
 		CreditCoin.STARS % PoloTeam.rating_stars(now[0]), CreditCoin.STARS % PoloTeam.rating_stars(now[1]), now[2], now[2] - int(was[2])])
-	c.queue.append({"type": "recap", "title": "%s ROSTER SET" % c.season_label(), "lines": lines, "next": c.next_season_label()})
+	var item := {"type": "recap", "title": "%s ROSTER SET" % c.season_label(), "lines": lines, "next": c.next_season_label()}
+	# the same report as data, for the roster set screen (the lines stay: an older build's recap)
+	var report := RosterReport.close(c, {"roster": me.roster.size(), "schol": me.roster.filter(func(p: PoloPlayer): return p.schol).size(),
+		"schol_max": Career.SCHOL_MAX, "roster_max": c.roster_max(), "walkons": walkons, "dev": dev, "ratings": RosterReport.ratings(c, me)})
+	if not report.is_empty():
+		item["report"] = report
+		item["screen"] = "roster_set"
+	c.queue.append(item)
+	# WELCOMING ALL WALK-ONS! (WalkOnShow): once, straight after the roster set report; it leaves
+	# the queue (saved) only once it's been seen. Nothing when the roster was already full.
+	if walkons > 0:
+		c.queue.append({"type": "walkons", "n": walkons, "ids": joined.map(func(q: PoloPlayer): return q.id),
+			"season": c.next_season_label(), "year": c.year + 1})
 	if c.needs_realign():
 		c.realign()
-	c.activate_pending()   # (a division added for next season: only ever here, between seasons)
 	c.phase = "season"
 	c.year += 1
 	c.start_season()
@@ -205,6 +245,8 @@ static func _ai_rosters(c: Career) -> Array:
 		for p in _fix_shape(c, t) + _trim(c, t):
 			c.cut_pool.append({"p": p, "from": id})
 	var lines := _pickups(c)
+	# the DEV Recruits still unsigned, and the CPU pool's one roll, sign with CPU programs first
+	lines.append_array(DevRecruits.cpu_recruit(c))
 	for id in c.teams:
 		if id == c.school:
 			continue
@@ -215,10 +257,11 @@ static func _ai_rosters(c: Career) -> Array:
 			join(c, t, p)
 		_fix_shape(c, t)
 		_trim(c, t)
-		_fill(c, t, Career.ROSTER_MAX)
+		WalkOns.fill(c, t)   # (open tryouts: every place still empty, as yours)
+		_fill(c, t, 0)
 		# a freshman or walk-on who lands on the bench is never rated above a starter (never a
-		# transfer: he arrives as he is)
-		CollegeGen.hold_bench(t, t.roster.filter(func(q: PoloPlayer): return not q in returning))
+		# transfer: he arrives as he is). A walk-on held down keeps no potential (Attributes.sync)
+		CollegeGen.hold_bench(t, t.roster.filter(func(q: PoloPlayer): return not q in returning and q.dev_recruit == ""))
 		t.sync_lineup()
 	c.cut_pool = []
 	return lines
@@ -270,6 +313,7 @@ static func _pickups(c: Career) -> Array:
 		var from_name := Colleges.team_name(String(e.from)) if not c.teams.has(String(e.from)) else String(c.teams[String(e.from)].name)
 		if String(e.from) == c.school:
 			lines.append("Signed elsewhere: %s (%s, %s*) joins %s" % [p.short_name(), p.pos_text(), PlayerForm.star_text(p.stars), best.name])
+			RosterReport.add(c, "elsewhere", p, {"to": best.id, "to_name": best.name})
 			c.add_news("%s, cut by %s, signs with %s" % [p.short_name(), from_name, best.name])
 	return lines
 
@@ -320,6 +364,7 @@ static func _age(c: Career, p: PoloPlayer, mine: bool) -> void:
 			c.add_news("%s grows into a %s" % [p.tag(), Traits.title(p.trait_id)])
 	p.year += 1
 	p.age += 1
+	p.walkon_rookie = false   # (a walk-on's rookie season is behind him)
 	Development.heal(p)
 
 static func join(c: Career, t: PoloTeam, p: PoloPlayer) -> void:
@@ -327,6 +372,8 @@ static func join(c: Career, t: PoloTeam, p: PoloPlayer) -> void:
 	p.number = t.free_number(p.is_keeper())
 	p.stats = {}
 	t.roster.append(p)
+	if DevRecruits.is_dev(p):
+		DevRecruits.fix_numbers(t)   # (his own cap: Blake #11, Logan #8; not with PIXEL POLO +)
 
 ## No more keepers than Career.keeper_cap and no more field players than the rest of the places
 ## (never expected: places are held by position): the extra goes, the weakest non-scholarship
@@ -380,7 +427,6 @@ static func _final_result(c: Career) -> void:
 
 ## Results move prestige; a conference only takes you so far.
 static func _prestige(c: Career) -> void:
-	var d3_champ := Schedule.winner(Schedule.d3_game(c.schedule, "d3_final")) if not Schedule.d3_game(c.schedule, "d3_final").is_empty() else ""
 	for id in c.teams:
 		var t: PoloTeam = c.teams[id]
 		var r: Dictionary = c.table[id]
@@ -391,10 +437,6 @@ static func _prestige(c: Career) -> void:
 		if id in c.season.nat_seeds:
 			delta += 3.0
 		if id == c.season.champion:
-			delta += 6.0
-		if id in c.season.get("d3_seeds", []):
-			delta += 3.0
-		if id == d3_champ:
 			delta += 6.0
 		var ceiling := 56.0 + 48.0 * Colleges.tier_frac(t.conf)
 		if t.prestige > ceiling and delta > 0.0:
@@ -411,8 +453,10 @@ static func _top_scorer(t: PoloTeam) -> PoloPlayer:
 			best = p
 	return best
 
-## Tops a roster up to `size` with walk-on freshmen, at the positions the roster is short of.
-## The same for every school. Never removes anyone. Returns how many joined.
+## Tops a roster up to `size` with walk-ons (WalkOns.make: their odds, no potential), at the
+## positions the roster is short of, and always to a keeper and six field players (only ever
+## past the places for a roster whose shape couldn't be filled in them: WalkOns.fill fills the
+## places first). The same for every school. Never removes anyone. Returns how many joined.
 static func _fill(c: Career, t: PoloTeam, size: int) -> int:
 	var added := 0
 	var used := {}
@@ -424,12 +468,13 @@ static func _fill(c: Career, t: PoloTeam, size: int) -> int:
 		var gk := t.roster.filter(func(q: PoloPlayer): return q.is_keeper()).size()
 		return gk == 0 or t.roster.size() - gk < Career.FIELD_MAX
 	while t.roster.size() < size or short.call():
-		var pos := CollegeGen.needed_pos(t, c.rng)
-		var p := CollegeGen.make_walkon(c.rng, pos, used)
+		var gk := t.roster.filter(func(q: PoloPlayer): return q.is_keeper()).size()
+		var pos := PoloPlayer.Pos.GK if gk == 0 else CollegeGen.needed_pos(t, c.rng)
+		if gk > 0 and pos == PoloPlayer.Pos.GK:
+			pos = CollegeGen.field_pos(c.rng)
+		var p := WalkOns.make(c.rng, pos, WalkOns.roll_stars(c.rng), used)
 		p.id = c.new_id()
-		p.number = t.free_number(p.is_keeper())
-		Development.ensure(p)
-		t.roster.append(p)
+		join(c, t, p)
 		added += 1
 	return added
 
@@ -437,7 +482,7 @@ static func _fill(c: Career, t: PoloTeam, size: int) -> int:
 static func _offers(c: Career, _unused := false) -> Array:
 	var fired := false
 	var me := c.team()
-	var good: bool = c.school in c.season.conf_champs or c.school in c.season.nat_seeds or c.school in c.season.get("d3_seeds", [])
+	var good: bool = c.school in c.season.conf_champs or c.school in c.season.nat_seeds
 	var pct := float(c.table[c.school].w) / maxf(1.0, float(c.table[c.school].w + c.table[c.school].l))
 	var ids: Array = c.teams.keys().filter(func(id):
 		var t: PoloTeam = c.teams[id]

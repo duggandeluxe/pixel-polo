@@ -205,7 +205,7 @@ func _majors(all: Array) -> Array:
 			by[e.key] = {"key": e.key, "cat": TrophyArt.cat_of(e), "title": String(e.title), "ncsa": not (e.kind == "tourney" and String(e.get("tid", "")) != "nat"), "entries": []}
 			out.append(by[e.key])
 		(by[e.key].entries as Array).append(e)
-	var rank := {"ncsa_champ": -4, "d3_champ": -3, "d2_champ": -2, "conf_champ": -1, "poy": 0, "dpoy": 1, "foy": 2, "arm": 3, "wall": 4, "first": 5, "second": 6, "pot": 7, "opot": 8, "dpot": 9}
+	var rank := {"ncsa_champ": -2, "conf_champ": -1, "poy": 0, "dpoy": 1, "foy": 2, "arm": 3, "wall": 4, "first": 5, "second": 6, "pot": 7, "opot": 8, "dpot": 9}
 	out.sort_custom(func(a, b): return int(rank.get(a.cat, 10)) < int(rank.get(b.cat, 10)))
 	return out
 
@@ -333,10 +333,11 @@ static func _snap(v: float) -> float:
 	return roundf(v / ART) * ART
 
 static func _wrap(text: String, w: float, cut := true) -> Array:
+	text = Loc.t(text)   # (the player's LANGUAGE: translated whole, then wrapped)
 	var out: Array = []
 	var line := ""
-	for word in text.split(" "):
-		var next := word if line == "" else line + " " + word
+	for word: String in Loc.units(text):
+		var next := word if line == "" else line + Loc.gap() + word
 		if Deck.text_w(next, 8, "body") <= w or line == "":
 			line = next
 		else:
@@ -345,7 +346,7 @@ static func _wrap(text: String, w: float, cut := true) -> Array:
 	if line != "":
 		out.append(line)
 	if cut and out.size() > 2:
-		out[1] = Deck.fit(" ".join(out.slice(1)), w, 8, "body")
+		out[1] = Deck.fit(Loc.gap().join(out.slice(1)), w, 8, "body")
 	return out
 
 # ------------------------------------------------------------------ shared
@@ -383,13 +384,13 @@ func _clickable(cv: Control, cb: Callable) -> void:
 
 ## A plaque's record: the award, when, where, for whom, the week that won it.
 func _show(e: Dictionary) -> void:
-	Game.dialog(String(e.title), _details(e), [["CLOSE", Callable(), "primary"]])
+	Game.dialog(String(e.title), _details(e), [["CLOSE", Callable(), "primary"]], "reward")
 
 func _show_trophy(t: Dictionary) -> void:
 	var parts := PackedStringArray()
 	for e in t.entries:
 		parts.append(_details(e))
-	Game.dialog(String(t.title), "\n\n".join(parts), [["CLOSE", Callable(), "primary"]])
+	Game.dialog(String(t.title), "\n\n".join(parts), [["CLOSE", Callable(), "primary"]], "reward")
 
 func _details(e: Dictionary) -> String:
 	var bits := PackedStringArray()

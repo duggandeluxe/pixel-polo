@@ -9,25 +9,34 @@ class_name GameSim
 
 ## Neutral-pool expected scores, for teams A and B (higher ratings are better):
 ##   GAP = OVR(A) - OVR(B); STYLE(T) = OFF(T) - OVR(T)
-##   TOTAL = 21.5 + 0.24 x (85 - average DEF) + 0.42 x |GAP| + 0.35 x (STYLE(A) + STYLE(B))
+##   TOTAL = 21.5 + 0.24 x (85 - average DEF) + 0.08 x |GAP| + 0.35 x (STYLE(A) + STYLE(B))
 ##   MATCH_A = OFF(A) - DEF(B); MATCH_B = OFF(B) - DEF(A)
-##   MARGIN = 0.475 x (MATCH_A - MATCH_B) + 0.10 x (STYLE(A) - STYLE(B))
+##   MARGIN = 0.265 x (MATCH_A - MATCH_B) + 0.10 x (STYLE(A) - STYLE(B)) + 0.04 x (GK(A) - GK(B))
 ##   EXPECTED_A = (TOTAL + MARGIN) / 2; EXPECTED_B = (TOTAL - MARGIN) / 2
+## (The Simulation Realism update.) MATCH_A - MATCH_B is twice the OVR gap, so the expected margin
+## is about 0.53 goals per OVR point: 80 v 78 about 12-11, 85 v 75 about 14-9, 88 v 68 about 17-6,
+## 92 v 65 about 20-5, the total staying near the game's 23-25 whatever the gap. GK is the starting
+## keeper's GOALKEEPING (PoloTeam.goalkeeping_display, 0-99): a better keeper takes goals off the
+## other side on top of the one star in seven he already is of the OVR. A ratings array without it
+## (three numbers) plays without the term.
 const BASE_TOTAL := 21.5
 const DEF_PIVOT := 85.0
 const DEF_TOTAL := 0.24
-const GAP_TOTAL := 0.42
+const GAP_TOTAL := 0.08
 const STYLE_TOTAL := 0.35
-const MATCH_MARGIN := 0.475
+const MATCH_MARGIN := 0.265
 const STYLE_MARGIN := 0.10
+const GK_MARGIN := 0.04
 ## The home pool: the host's expected goals x 1.05, the visitors' x 0.95. Once, in the expected
 ## scores; never on the rating, the win chance or again in overtime. Neutral sites have none.
 const HOME_BOOST := 1.05
 const AWAY_DROP := 0.95
 ## The final score: the total sampled around the expected total (never under MIN_TOTAL), the
 ## margin sampled on its own.
+## MARGIN_SD: an even game stays a coin flip decided by a goal or three; nine OVR points apart the
+## underdog still wins about one in ten; twenty apart it's a once-in-a-season shock.
 const TOTAL_SD := 3.1
-const MARGIN_SD := 4.5
+const MARGIN_SD := 3.2
 const MIN_TOTAL := 15
 const QUARTERS := 4
 ## Overtime: two 3-minute periods at the game's own scoring rates (a quarter is 8 minutes), then
@@ -35,10 +44,13 @@ const QUARTERS := 4
 const OT_PERIODS := 2
 const OT_SHARE := 3.0 / 32.0
 const POSSESSIONS := 24        # each side, for the keepers' saves
+const ASSIST_SHARE := 0.55     # a goal's share with an assist
+const SAVE_SHARE := 0.42       # a non-scoring possession's share the other keeper saved
 
-## [OVR, OFF, DEF] for the engine: the seven starters' permanent stars and lean (PoloTeam.ratings).
+## [OVR, OFF, DEF, GK] for the engine: the seven starters' permanent stars and lean
+## (PoloTeam.ratings), and the starting keeper's GOALKEEPING (PoloTeam.goalkeeping_display).
 static func sim_ratings(t: PoloTeam) -> Array:
-	return t.ratings()
+	return t.ratings() + [float(t.goalkeeping_display())]
 
 ## The ratings a game is played with: BASE ([OVR, OFF, DEF], sim_ratings) with the team's form
 ## (PoloTeam.form_delta, the engine's HEAT UP term), added once to OFF and to DEF; OVR stays their
@@ -46,11 +58,11 @@ static func sim_ratings(t: PoloTeam) -> Array:
 ## `delta`: the form to play with instead of the team's own now, and `base` the BASE (a saved
 ## game replayed: the players may have moved on since).
 static func live_ratings(t: PoloTeam, delta: Variant = null, base: Array = []) -> Array:
-	var r := base if base.size() == 3 else sim_ratings(t)
+	var r := base if base.size() >= 3 else sim_ratings(t)
 	var d := float(t.form_delta() if delta == null else int(delta))
 	if d == 0.0:
 		return r
-	return [float(r[0]) + d, float(r[1]) + d, float(r[2]) + d]
+	return [float(r[0]) + d, float(r[1]) + d, float(r[2]) + d] + r.slice(3)   # (the keeper's GK as it is)
 
 ## Expected goals [a's, b's] for a game between them, before it's played: the engine's own
 ## odds for it, on the ratings it will be played with (LIVE: BASE and the teams' form), the home
@@ -72,6 +84,8 @@ static func neutral_expected(a: Array, b: Array) -> Array:
 	var match_a := float(a[1]) - float(b[2])
 	var match_b := float(b[1]) - float(a[2])
 	var margin := MATCH_MARGIN * (match_a - match_b) + STYLE_MARGIN * (style_a - style_b)
+	if a.size() > 3 and b.size() > 3:
+		margin += GK_MARGIN * (float(a[3]) - float(b[3]))
 	return [(total + margin) / 2.0, (total - margin) / 2.0]
 
 ## Expected goals [home, away]: neutral, then the home pool's 5% unless it's a neutral site.
@@ -89,12 +103,7 @@ static func ot_expected(xg: Array) -> Array:
 ## {s: [h, a], reg: [h, a], q: [[h by quarter], [a ...]], ot: [[h by period], [a ...]], w: 0|1}.
 ## `ot` is empty unless regulation ended level; a sudden-death goal is a period of its own.
 static func score(xg: Array, rng: RandomNumberGenerator) -> Dictionary:
-	var total_exp := float(xg[0]) + float(xg[1])
-	var margin_exp := float(xg[0]) - float(xg[1])
-	var total := maxi(MIN_TOTAL, roundi(rng.randfn(total_exp, TOTAL_SD)))
-	var margin := rng.randfn(margin_exp, MARGIN_SD)
-	var h := clampi(roundi((total + margin) / 2.0), 0, total)
-	var reg := [h, total - h]
+	var reg := regulation(xg, rng)
 	var q := [[0, 0, 0, 0], [0, 0, 0, 0]]
 	for side in 2:
 		for _i in reg[side]:
@@ -115,6 +124,24 @@ static func score(xg: Array, rng: RandomNumberGenerator) -> Dictionary:
 			ot[1 - first].append(0)
 			s[first] += 1
 	return {"s": s, "reg": reg, "q": q, "ot": ot, "w": 0 if s[0] > s[1] else 1}
+
+## Regulation goals [h, a] around `xg` (whole-game expected goals) for `share` of the game (1 the
+## whole of it, as score() plays it; SIM TO END the part that's left): the total and the margin
+## sampled separately, both scaled to the share (their spread by its square root, the way a sum of
+## independent possessions spreads), the minimum total too. A share of 1 is exactly score()'s.
+static func regulation(xg: Array, rng: RandomNumberGenerator, share := 1.0) -> Array:
+	share = clampf(share, 0.0, 1.0)
+	var total_exp := (float(xg[0]) + float(xg[1])) * share
+	var margin_exp := (float(xg[0]) - float(xg[1])) * share
+	var spread := sqrt(share)
+	var total := maxi(roundi(MIN_TOTAL * share), roundi(rng.randfn(total_exp, TOTAL_SD * spread)))
+	var margin := rng.randfn(margin_exp, MARGIN_SD * spread)
+	var h := clampi(roundi((total + margin) / 2.0), 0, total)
+	return [h, total - h]
+
+## A shootout penalty: does `shooter` beat `gk`? (shootout's odds, and SIM TO END's)
+static func penalty_scores(shooter: PoloPlayer, gk: PoloPlayer, rng: RandomNumberGenerator) -> bool:
+	return rng.randf() < clampf(0.74 + (shooter.shoot - gk.keeping) * 0.004, 0.55, 0.9)
 
 static func poisson(mean: float, rng: RandomNumberGenerator) -> int:
 	var limit := exp(-mean)
@@ -150,14 +177,14 @@ static func play(home: PoloTeam, away: PoloTeam, seed_value: int, neutral := fal
 		for _i in int(sc.s[side]):
 			var shooter := _pick(field, func(p): return PlayerForm.shot_weight(p), rng)
 			out.goals[side].append(shooter)
-			if rng.randf() < 0.55:
+			if rng.randf() < ASSIST_SHARE:
 				var others := field.filter(func(p): return p != shooter)
 				if not others.is_empty():
 					out.assists[side].append(others[rng.randi() % others.size()])
 		# the other keeper's saves: some of the possessions that didn't score
 		var missed := maxi(POSSESSIONS + rng.randi_range(-3, 3), int(sc.s[side]) + 4) - int(sc.s[side])
 		for _i in missed:
-			if rng.randf() < 0.42:
+			if rng.randf() < SAVE_SHARE:
 				out.saves[1 - side] += 1
 		out.missed[side] = missed
 	out["lines"] = player_lines(home, away, out, seed_value)
@@ -295,7 +322,7 @@ static func shootout(a: PoloTeam, b: PoloTeam, rng: RandomNumberGenerator) -> Ar
 		for side in 2:
 			var shooter := OppSim._pick_shooter(teams[side], rng)
 			var gk: PoloPlayer = teams[1 - side].keeper()
-			if rng.randf() < clampf(0.74 + (shooter.shoot - gk.keeping) * 0.004, 0.55, 0.9):
+			if penalty_scores(shooter, gk, rng):
 				s[side] += 1
 		if rounds >= 5 and s[0] != s[1]:
 			break

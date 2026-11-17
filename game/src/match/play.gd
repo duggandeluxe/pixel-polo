@@ -88,6 +88,13 @@ const BREAK_CHECK := 0.5
 const BREAK_TRAIL := 1.5      # an attacker this far behind the ball is still in the break
 const BREAK_BACK := 1.5       # a defender this far behind the ball (alongside him) or goal side of it is back
 const BREAK_FRONT := 3        # a break is counted by its front: at most this many attackers (the rest trail)
+## While the counter's on (carry), every attacking field player swimming forward in it goes this much
+## faster than he would in a settled possession (Swimmer.surge, on top of his own boost and pace).
+const COUNTER_SURGE := 1.25
+## THEIR counter (OffenseAI, attacking you): no ball back while any of their field players is still
+## in his own half. A pass is "back" when it lands more than this behind the man throwing it
+## (along the attack: x, in the possession's frame); square and forward balls are fine.
+const BACK_PASS_SLACK := 0.5
 ## The breakout: the ball changed hands in live play, and while the result banner is up the
 ## team that won it turns and swims at the other goal (fanning into lanes) and the team that lost
 ## it turns and gets back (PlayAI._breakout). Then the next possession picks up: a counter if the
@@ -200,15 +207,15 @@ const CONTACT_FULL := 0.4
 const CONTACT_ZONE := {PlayDefense.Zone.FRONT: 1.0, PlayDefense.Zone.SIDE: 0.8, PlayDefense.Zone.BEHIND: 0.5}
 const CATCH_EXCL := 0.17       # a man caught inside the box with his man behind him, on the catch
 ## Fouled from behind on a clear scoring chance (penalty_foul): every defensive foul goes through
-## _ordinary_foul, and one that's directly from behind (the defender at least BEHIND_MIN back from the
-## man along his line to the goal, and within BEHIND_CONE degrees of straight behind him: beside him,
-## or holding his shoulder, isn't) on a clear chance is a penalty,
+## _ordinary_foul, and one that's from behind (behind: the defender at least BEHIND_MIN back from the
+## man along his line to the goal, and within the inside-water cone, INSIDE_WATER_COS, of straight
+## behind him: the man has inside water on him; beside him, or holding his shoulder, isn't) on a
+## clear chance is a penalty,
 ## never an ordinary foul. A clear chance is in the goalie box (the penalty area), and either a
 ## probable goal (CenterDefense.probable) or any look at the goal (close_chance) with nobody
 ## else in his way to the goal (within OPEN_LANE of his line to it: a breakaway). The geometry is his own
 ## attack's: Play always attacks x = 30, whichever end of the pool the screen shows it at.
 const BEHIND_MIN := 0.25
-const BEHIND_CONE := 45.0
 const OPEN_LANE := 0.9
 ## (The press on the ball, ordinary fouls: DefenseFormation's CONTACT_R, FOUL_SETTLE and FOUL_RATE,
 ## times foul_pressure: the defender's Defense against his Strength.)
@@ -227,7 +234,11 @@ var shot_start := SHOT_CLOCK # what it started from (less than SHOT_CLOCK after 
 var elapsed := 0.0           # live seconds (the game clock runs with these)
 var freeze := 0.0            # whistle: play stops, bodies reset
 var man_up := 0.0
+## The 6 on 5's clock waits for the power play's first pass (or a shot straight off the free
+## throw): until then it holds at what it was given. Every exclusion starts it waiting again.
+var man_up_live := false
 var excluded: Swimmer = null
+var excl_player: PoloPlayer = null   # who the 6 on 5 is against (kept after he's back in: carry-over)
 var pressure := 0.0
 var free_throw := false      # after a foul inside 6 m the ball must be passed first
 ## A FOUL RESTART: every whistle (an ordinary foul, an exclusion) stops the shot clock and keeps
@@ -246,9 +257,13 @@ var break_t := 0.0           # seconds to the next look at the numbers
 var rotating: Swimmer = null # the counter's carrier, swimming the ball back out to his spot
 var lanes := {}              # the break: each man in it -> his lane, -1 top, 0 middle, +1 bottom (PlayAI.assign_lanes)
 var lane_key := ""           # ...who they were given out to
+## The counter's rotation (CounterCurl): how a counter that's already on is swum. Never whether there is one.
+var curl_mode: int = 0       # CounterCurl.Mode: OFF until a confirmed counter (kind COUNTER, carry) starts it
+var rot: RefCounted = null   # ...its state (CounterCurl.Rotation): who's on which spot, who's coming for it
 var marks_t := 0.0           # the break: seconds since the defence last sorted out who takes whom (PlayAI.counter_marks)
 var marks_ball: Swimmer = null   # ...and who had the ball then
 var catch_t := INF           # seconds since the man with the ball caught a pass (INF: he didn't)
+var cs_k := 1.0              # the catch-and-shoot window's share at this difficulty (Difficulty.catch_shoot_k; MatchFlow sets it on your attack)
 var release_t := INF         # seconds since a catch-and-shoot left the hand (INF: none); the screen's white ring
 var release_by: Swimmer = null   # ...and who threw it
 var drive_timer := 2.5
@@ -261,8 +276,8 @@ var frame_rebound := false   # the loose ball came off the post or the bar (_cen
 var over := false
 var result: Dictionary = {}
 var events: Array[Dictionary] = []
-var level := Difficulty.MEDIUM   # the defending team's AI (its defenders and keeper): Difficulty, 0..1
-var cpu_level := Difficulty.MEDIUM   # the other team's level whichever end it's at (its shots' pace: Difficulty.cpu_shot_speed)
+var level := Difficulty.BASELINE   # the defending team's AI (its defenders and keeper): Difficulty, 0..1
+var cpu_level := Difficulty.BASELINE   # the other team's level whichever end it's at (its shots' pace: Difficulty.cpu_shot_speed)
 var ai_rng := RandomNumberGenerator.new()   # ...its own dice for its choices, so the game's rng is untouched
 var gk_memory := Vector3.ZERO   # where this attack's shots have gone today: near post, middle, far post (KeeperAI)
 var gk_state: int = KeeperAI.State.READY   # their keeper's state (KeeperAI.state_of), for the screen and tests
@@ -387,6 +402,23 @@ func set_level(l: float) -> void:
 ## attacking; your own keeper is never touched.
 func gk_k() -> float:
 	return 1.0 if defending else Difficulty.cpu_keeper_react(level)
+
+## The CPU keeper's dive-speed multiplier (Difficulty.cpu_keeper_dive): theirs only.
+func gk_dive_k() -> float:
+	return 1.0 if defending else Difficulty.cpu_keeper_dive(level)
+
+## How early in the shot clock it is for the CPU keeper's wing read: 1 with WING_EARLY.y s or more
+## left, 0 by WING_EARLY.x.
+const WING_EARLY := Vector2(14.0, 20.0)
+func wing_early() -> float:
+	return smoothstep(WING_EARLY.x, WING_EARLY.y, shot_clock)
+
+## The CPU keeper's reaction multiplier for this shooter's shot: gk_k, and quicker again for a
+## wing ("1", "5") shooting early in the shot clock (Difficulty.cpu_keeper_wing).
+func gk_shot_k(shooter: Swimmer) -> float:
+	if defending or shooter == null or not shooter.tag in ["1", "5"]:
+		return gk_k()
+	return gk_k() * Difficulty.cpu_keeper_wing(level, wing_early())
 
 ## The CPU defenders' arm-raise-delay multiplier (Difficulty.cpu_arm_delay): theirs when you're
 ## attacking; your own defenders are never touched.
@@ -571,7 +603,7 @@ func step(dt: float) -> void:
 			hold_t += dt
 	if carry:
 		_watch_break(dt)
-	if man_up > 0.0:
+	if man_up > 0.0 and man_up_live:
 		man_up -= dt
 		if man_up <= 0.0:
 			_end_man_up()
@@ -811,6 +843,7 @@ func _pass(to: Vector2, receiver: Swimmer) -> void:
 	pressure = 0.0
 	free_throw = false
 	_end_restart()   # the free throw's released: the shot clock runs again, contact is back
+	man_up_live = true   # (a 6 on 5's clock runs from its first pass)
 	events.append({"k": "pass", "to": receiver.tag if receiver != null else "", "first": first_entry_was,
 		"through": not first_entry.is_empty()})   # (a counter goes on: whoever catches it carries the break)
 
@@ -903,7 +936,7 @@ func _shoot(cross_y: float, power: float, exact: bool = false) -> void:
 	# the keeper's body is his attributes' and his form's (a WALL's reach), whatever the difficulty;
 	# the difficulty is only how he reads it (iq), from what he can see (KeeperAI)
 	var keeping := keeper.player.live("keeping") + (WALL_BONUS if Traits.has(keeper.player, "wall") else 0.0)
-	var ctx := {"catch_t": catch_t, "home_keeper": home_keeper, "exact": exact,
+	var ctx := {"catch_t": catch_t, "cs_k": cs_k, "home_keeper": home_keeper, "exact": exact,
 		"pass_mod": Attributes.pass_mod(passer.player) if passer != null and catch_t < INF else 0.0,
 		"release": Attributes.release_read(shooter.player) + keeper_late,
 		"lunge": Attributes.lunge_mult(keeper.player), "leg": Attributes.leg_reach(keeper.player),
@@ -911,9 +944,9 @@ func _shoot(cross_y: float, power: float, exact: bool = false) -> void:
 		"block": Attributes.block_mod(keeper.player), "window": Attributes.dive_window(keeper.player),
 		"wall": Traits.has(keeper.player, "wall"),
 		"iq": level, "memory": gk_memory, "close": close_chance(shooter), "contact": contact_on(shooter),
-		"pace": shot_pace(shooter),
+		"pace": shot_pace(shooter), "skill_top": Attributes.rating_top(shooter.player),
 		"seen": raise_t if raised else 0.0, "hold": gk_hold() if not defending else 0.0, "arms": _arms(shooter),
-		"gk_k": gk_k(),
+		"gk_k": gk_shot_k(shooter), "gk_dive": gk_dive_k(),
 		# the CPU's shot (their attack, at your goal): its pace at the difficulty, fixed here at the release
 		"speed_k": cpu_speed_k(power)}
 	if gk_read != KeeperAI.NO_READ and not defending:
@@ -985,6 +1018,7 @@ func _launch(shooter: Swimmer, res: Dictionary, power: float, bar_roll: float = 
 	pressure = 0.0
 	carry = false
 	_end_restart()   # (a free throw from outside 6 m may go straight at goal: released all the same)
+	man_up_live = true   # (...and a 6 on 5 shot straight off it has started its clock all the same)
 	events.append({"k": "shot", "by": shooter.player, "power": power, "range": Geo.range_to_goal(shooter.pos),
 		"catch_shoot": res.get("catch_shoot", 0.0), "cross": res.get("cross", 0.0), "power_shot": res.get("power_shot", false)})
 
@@ -1039,7 +1073,7 @@ func arm_block(cross_y: float, power: float) -> Dictionary:
 	if arms.is_empty():
 		return {}
 	var mods := shot_mods(holder)
-	var speed := ShotModel.shot_speed(power, shot_pace(holder), mods, contact_on(holder))
+	var speed := ShotModel.shot_speed(power, shot_pace(holder), mods, contact_on(holder), Attributes.rating_top(holder.player))
 	var dir := Vector2(Geo.GOAL_X, cross_y) - holder.pos
 	var best := {}
 	for arm: Dictionary in arms:
@@ -1057,7 +1091,7 @@ func sure_block(cross_y: float, power: float) -> Dictionary:
 	if holder == null or kind == Kind.PENALTY:
 		return {}
 	var mods := shot_mods(holder)
-	var speed := ShotModel.shot_speed(power, shot_pace(holder), mods, contact_on(holder)) * cpu_speed_k(power)
+	var speed := ShotModel.shot_speed(power, shot_pace(holder), mods, contact_on(holder), Attributes.rating_top(holder.player)) * cpu_speed_k(power)
 	var dir := Vector2(Geo.GOAL_X, cross_y) - holder.pos
 	var late := Attributes.release_read(holder.player) + keeper_late
 	return ShotModel.sure_block(holder.pos, dir, speed, _blockers(holder), late, _arms(holder))
@@ -1457,7 +1491,7 @@ func _keeper_reads(c: Swimmer) -> bool:
 ## How far `s` can swim in `secs` going flat out (at `boost`) for one spot, from the way he's
 ## moving now: Swimmer.step's acceleration, then his top speed.
 static func reach(s: Swimmer, secs: float, boost: float, dir := Vector2.ZERO) -> float:
-	var vmax := s.top_speed * boost
+	var vmax := s.top_speed * boost * s.surge
 	var acc := s.accel * boost
 	var v0 := clampf(s.vel.dot(dir), 0.0, vmax) if dir != Vector2.ZERO else 0.0
 	var tv := (vmax - v0) / acc
@@ -1733,15 +1767,11 @@ func _fouler(s: Swimmer) -> Swimmer:
 	return d
 
 ## Inside water: `s` is between his own man and the goal, that man behind him (the far side from
-## the goal) and close enough to foul him. Beside him or goal side of him (ball side) isn't.
+## the goal: Play.behind, the same water a foul from him is judged on) and close enough to foul
+## him. Beside him or goal side of him (ball side) isn't.
 func has_inside_water(s: Swimmer) -> bool:
 	var d := _fouler(s)
-	if d == null:
-		return false
-	var back := s.pos - d.pos
-	if back.length() < 0.05:
-		return false
-	return back.normalized().dot((Geo.goal_center() - s.pos).normalized()) >= INSIDE_WATER_COS
+	return d != null and behind(s.pos, d.pos, Geo.goal_center())
 
 ## The fed centre catches it and his beaten man hangs on (CENTER_EXCL, a WRESTLER either side
 ## shifting it): decided on the catch, whistled CENTER_FOUL_T later (_center_hold_foul).
@@ -1893,8 +1923,11 @@ func shot_barred() -> bool:
 ## `d` is sent out; `drawn` is the attacker who drew it (credited with it in the box score).
 func _exclusion(d: Swimmer, drawn: Swimmer = null) -> void:
 	excluded = d
+	excl_player = d.player
 	d.out = true
+	d.rejoin = false
 	man_up = MAN_UP_TIME
+	man_up_live = false   # (it starts on the power play's first pass)
 	shot_clock = maxf(shot_clock, 20.0)
 	freeze = 1.2
 	catch_t = INF
@@ -1910,6 +1943,47 @@ func _exclusion(d: Swimmer, drawn: Swimmer = null) -> void:
 	events.append({"k": "exclusion", "text": "EXCLUSION  %s" % d.player.tag(),
 		"drawn_by": drawn.player if drawn != null else null, "by": d.player})
 
+## A 6 on 5 left over from the end of the last period (MatchFlow.carry_man_up): the team that had
+## it won the sprint, so this possession opens with it, already set up in the 4-2 and the same man
+## (`who`, if he's in the water; else one of theirs) in the box. `secs` is the time it had left;
+## its clock waits for the first pass, as any 6 on 5's does.
+func open_man_up(secs: float, who: PoloPlayer) -> void:
+	if secs <= 0.0 or kind == Kind.PENALTY:
+		return
+	var d: Swimmer = null
+	for s in defenders:
+		if s.out:
+			continue
+		if s.player == who:
+			d = s
+			break
+		if d == null or s.dtag != "C":
+			d = s   # (failing him: anyone but the centre's guard, if there's anyone else)
+	if d == null:
+		return
+	excluded = d
+	excl_player = d.player
+	d.out = true
+	d.rejoin = false
+	d.pos = Geo.REENTRY
+	man_up = secs
+	man_up_live = false
+	PlaySetup.apply_formation(self, true)
+	zone_set = false
+	for a in attackers:
+		if not a.out:
+			a.pos = a.home
+			a.vel = Vector2.ZERO
+	for s in defenders:
+		if not s.out and s.mark != null:
+			s.pos = s.mark.pos + Vector2(1.0, 0.0)   # (goal side of his man; the zone sorts itself out)
+			s.vel = Vector2.ZERO
+	for s in bodies():
+		s.target = s.pos
+	if holder != null:
+		_hold_ball()
+	events.append({"k": "man_up_carry", "secs": secs, "by": d.player})
+
 func _end_man_up() -> void:
 	if excluded != null:
 		if excluded.player.rolled:
@@ -1919,12 +1993,25 @@ func _end_man_up() -> void:
 			if sub != null:
 				excluded.player = sub
 				excluded.out = false
+				excluded.rejoin = true
 		else:
 			excluded.out = false
+			excluded.rejoin = true
 		excluded = null
 	PlaySetup.apply_formation(self, false)
 	PlayAI.restore_marks(self)
+	_reopen_call()
 	events.append({"k": "even"})
+
+## Your defence back to even strength (CALL DROP, FormationBar): the 6 on 5 overrode any drop you'd
+## called, so you're back in your normal defence with the call open again, to make again if you want
+## it. The computer's defence (and yours in SIM, ai_drop) runs its own call (DropCall), untouched.
+func _reopen_call() -> void:
+	if not defending or ai_drop >= 0 or kind == Kind.PENALTY:
+		return
+	formation_locked = false
+	if formation != DefenseFormation.F.PRESS or drop_pending >= 0:
+		form_up(DefenseFormation.F.PRESS)
 
 ## Who takes a ROLLED defender's place: the first of his team's starters (PoloTeam.starters:
 ## the rolled one swapped out) not already in the water; null if there's nobody.
@@ -1948,14 +2035,19 @@ func fouled_from_behind(s: Swimmer, d: Swimmer) -> bool:
 		return false
 	return behind(s.pos, d.pos, Geo.goal_center())
 
-## Is a defender at `d` directly behind a man at `a` attacking `goal`: at least BEHIND_MIN back from
-## him along his line to it, and within BEHIND_CONE of straight behind? Whichever way he's attacking.
+## Is a defender at `d` behind a man at `a` attacking `goal`, beaten (`a` has inside water on him):
+## at least BEHIND_MIN back from him along his line to it, and within the inside-water cone
+## (INSIDE_WATER_COS, about 50 degrees) of straight behind? From the real positions only, whichever
+## way he's attacking, whatever the formation. The one test of "beaten": inside water
+## (has_inside_water) and a foul from behind (fouled_from_behind) can never disagree, so a man
+## with inside water fouled by the man he has it on, on a clear chance, is a penalty.
 static func behind(a: Vector2, d: Vector2, goal: Vector2) -> bool:
 	var g := goal - a
-	var v := d - a
+	var v := a - d   # (from the defender to the man)
 	if g.length() < 0.01 or v.length() < 0.01:
 		return false
-	return v.dot(g.normalized()) <= -BEHIND_MIN and absf(rad_to_deg(g.angle_to(v))) >= 180.0 - BEHIND_CONE
+	var gn := g.normalized()
+	return v.dot(gn) >= BEHIND_MIN and v.normalized().dot(gn) >= INSIDE_WATER_COS
 
 ## A clear scoring chance for `s` (fouled by `d`): in the goalie box, and a probable goal or a look
 ## at the goal with his way to it open (nobody but `d` and the keeper in it).
@@ -2005,7 +2097,7 @@ func _turnover(s: Swimmer, text: String, why: String) -> void:
 func catch_glow() -> float:
 	if over or holder == null or ball.state != Ball.State.HELD or freeze > 0.0 or kind == Kind.PENALTY:
 		return 0.0
-	return ShotModel.catch_shoot(catch_t)
+	return ShotModel.catch_shoot(catch_t, cs_k)
 
 # ------------------------------------------------------------------ counterattacks
 ## Where everybody is right now, for the next possession (the other team's, attacking the
@@ -2066,6 +2158,36 @@ func _watch_break(dt: float) -> void:
 	if not is_break():
 		end_counter()
 
+## `s`'s counter speed this frame (Swimmer.surge): COUNTER_SURGE for an attacking field player in
+## the counter (carry) swimming forward or across, 1.0 for everybody else: the defence getting back,
+## the keepers, a man excluded or swimming back in, and everybody once the counter's over.
+func counter_surge(s: Swimmer) -> float:
+	if not carry or over or s.keeper or s.out or s.rejoin or not attackers.has(s):
+		return 1.0
+	var to := s.target - s.pos
+	if to.x < -0.25 * to.length():
+		return 1.0   # (going back the way he came: not part of the break)
+	return COUNTER_SURGE
+
+## Every attacking field player still in the water (not excluded, not on his way back in) is over
+## halfway. The keepers don't count.
+func attack_over_half() -> bool:
+	for a in attackers:
+		if a.out or a.rejoin or a.keeper:
+			continue
+		if a.pos.x <= Geo.HALF:
+			return false
+	return true
+
+## THEIR counter (you defending it, OffenseAI choosing): no backward passes yet, while any of their
+## field players is still in his own half. Never on your attack, never in a settled possession.
+func back_pass_barred() -> bool:
+	return defending and carry and not over and not attack_over_half()
+
+## A ball from `from` to `to` goes backwards (towards the attack's own end) by more than BACK_PASS_SLACK.
+static func is_back_pass(from: Vector2, to: Vector2) -> bool:
+	return to.x < from.x - BACK_PASS_SLACK
+
 ## The counter's over without a shot: the carrier takes it back out to his spot (if he's in
 ## front of it), the centre goes to 2 m, everybody else to theirs, the defence picks up its men.
 func end_counter() -> void:
@@ -2106,6 +2228,7 @@ func _start_breakout() -> void:
 	var lost_by: Variant = result.get("lost_by")
 	if excluded != null:
 		excluded.out = false   # his team has the ball: an excluded man comes straight back in
+		excluded.rejoin = true
 		excluded = null
 	for d in defenders:
 		d.react = 0.0 if d == holder else r.randf_range(PlaySetup.ATTACK_REACT.x, PlaySetup.ATTACK_REACT.y)
@@ -2145,12 +2268,13 @@ func _pair_breakout_centre() -> void:
 func _move(dt: float) -> void:
 	var list := bodies()
 	for s in list:
+		s.surge = counter_surge(s)
 		s.step(dt)
 	for i in list.size():
 		for j in range(i + 1, list.size()):
 			var a := list[i]
 			var b := list[j]
-			if a.out or b.out:
+			if a.out or b.out or a.rejoin or b.rejoin:
 				continue
 			var d := b.pos - a.pos
 			var l := d.length()
@@ -2161,6 +2285,12 @@ func _move(dt: float) -> void:
 				if not b.keeper:
 					b.pos += push
 	for s in list:
+		if s.rejoin:
+			# swimming in from the exclusion box (behind the goal line): no snapping him in, he's
+			# back in the field when he's swum into it
+			if Geo.clamp_in_pool(s.pos).distance_squared_to(s.pos) > 0.0001:
+				continue
+			s.rejoin = false
 		if not s.out:
 			s.pos = Geo.clamp_in_pool(s.pos)
 

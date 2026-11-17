@@ -9,6 +9,11 @@ extends BaseScreen
 const W := 416                       # the content column; the rest of the page is blue
 const PANEL_GAP := 7
 const ROYAL := Color("1f52c9")       # the summary bar
+## The two panels' share of the column: fixed, so neither moves whatever the picks' texts are
+## (the descriptions wrap rather than widen their panel).
+const FOCUS_RATIO := 240.0
+const INTENSITY_RATIO := 169.0
+const INTENSITY_FONT := 20           # the LIGHT / NORMAL / HARD words: the headline font at its own size
 ## What each choice does, in a line or two (Training's numbers are the truth).
 const FOCUS_TEXT := {
 	"balanced": "Standard XP for all players.",
@@ -50,15 +55,32 @@ func _render() -> void:
 	top.add_child(_focus_panel(focus))
 	top.add_child(_intensity_panel(inten, recovery))
 	body.add_child(UI.spacer(0, PANEL_GAP))
-	body.add_child(centered(_summary(Training.FOCI[focus].name, "-" if recovery else Training.INTENSITY[inten])))
+	var summary := centered(_summary(Training.FOCI[focus].name, "-" if recovery else Training.INTENSITY[inten]))
+	summary.name = "Summary"
+	body.add_child(summary)
 	body.add_child(UI.spacer(0, 4))
+	if c.is_eliminated():
+		# SEASON OVER (Championship Elimination): no game left to practise for. The plan is on show,
+		# read only; nothing trains until next season (Career.train_week)
+		top.modulate = Color(1, 1, 1, 0.45)
+		for n in top.find_children("*", "BaseButton", true, false):
+			(n as BaseButton).disabled = true
+		var note := UI.label("SEASON OVER: NO PRACTICE SESSIONS UNTIL NEXT SEASON", 8, UI.WARN, "caps")
+		note.name = "SeasonOverNote"
+		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		body.add_child(note)
+		body.move_child(note, 0)
 
 func _set_focus(key: String) -> void:
+	if c.is_eliminated():
+		return
 	c.training.focus = key
 	Game.save_career()
 	_render()
 
 func _set_intensity(lv: int) -> void:
+	if c.is_eliminated():
+		return
 	c.training.intensity = lv
 	Game.save_career()
 	_render()
@@ -77,43 +99,56 @@ func _focus_panel(focus: String) -> Control:
 	for k in Training.FOCUS_ORDER:
 		var key: String = k
 		var on := key == focus
+		# (a step lighter than the panel, so they stand up off it; the pick a warmer fill and gold)
 		var b := flat_button(Training.FOCI[key].name, func(): _set_focus(key),
-			Deck.NAVY, UI.GOLD if on else UI.BORDER, UI.GOLD if on else UI.TEXT, 16)
+			Deck.NAVY_HEAD.lerp(UI.GOLD, 0.14) if on else Deck.NAVY_HEAD, UI.GOLD if on else UI.BORDER, UI.GOLD if on else UI.TEXT, 16)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(b)
 	v.add_child(UI.spacer(0, 1, true))   # (the panel runs down the page: the pick's text at its foot)
 	v.add_child(divider_line())
 	v.add_child(_choice(Training.FOCI[focus].name, FOCUS_TEXT.get(focus, "")))
 	p.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	p.size_flags_stretch_ratio = FOCUS_RATIO
 	return p
 
-## LIGHT / NORMAL / HARD (the pick filled yellow), then what it means. A RECOVERY week ignores
+## LIGHT / NORMAL / HARD (the pick filled yellow): three full-width rows, stacked, sharing the
+## panel's height down to what the pick means, their words big enough to fill them. A RECOVERY week ignores
 ## intensity: the buttons are dimmed and can't be pressed.
 func _intensity_panel(inten: int, recovery: bool = false) -> Control:
 	var v := UI.vbox(3)
 	var p := navy_panel(v)
 	v.add_child(_heading("TRAINING INTENSITY"))
-	var h := UI.hbox(6)
+	var h := UI.vbox(5)
+	h.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(h)
 	for i in range(1, 4):
 		var lv := i
 		var on := lv == inten and not recovery
 		var b := flat_button(Training.INTENSITY[lv], func(): _set_intensity(lv),
-			UI.GOLD if on else Deck.NAVY, UI.GOLD if on else UI.BORDER, UI.INK if on else UI.TEXT, 20)
+			UI.GOLD if on else Deck.NAVY_HEAD, UI.GOLD if on else UI.BORDER, UI.INK if on else UI.TEXT, 20)
 		b.name = "Intensity_" + Training.INTENSITY[lv]
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		# (the headings' chunky font, on a hard 1 px drop shadow: the panel's navy, or a deep gold
+		# under the pick's ink, so the words stand up off the bar)
+		b.add_theme_font_override("font", UI.font_big)
+		b.add_theme_font_size_override("font_size", INTENSITY_FONT)
+		b.add_theme_color_override("font_shadow_color", UI.GOLD.darkened(0.35) if on else Deck.NAVY)
+		b.add_theme_constant_override("shadow_offset_x", 1)
+		b.add_theme_constant_override("shadow_offset_y", 1)
 		if recovery:
 			b.disabled = true
-			b.add_theme_stylebox_override("disabled", UI.chunky(Deck.NAVY, UI.DIM2, false, false, 4, 1))
+			b.add_theme_stylebox_override("disabled", UI.chunky(Deck.NAVY, UI.DIM2, false, false, 4, 1, UI.BEVEL_SUNK))
 			b.add_theme_color_override("font_disabled_color", UI.DIM2)
 		h.add_child(b)
-	v.add_child(UI.spacer(0, 4, true))
+	v.add_child(UI.spacer(0, 4))
 	v.add_child(divider_line())
 	if recovery:
 		v.add_child(_choice("INACTIVE", "Recovery ignores intensity:\nno XP, no injury risk."))
 	else:
 		v.add_child(_choice(Training.INTENSITY[inten], intensity_text(inten)))
 	p.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	p.size_flags_stretch_ratio = INTENSITY_RATIO
 	return p
 
 ## CURRENT TRAINING: X | INTENSITY: Y
@@ -143,5 +178,7 @@ func _choice(title: String, text: String) -> Control:
 	var v := UI.vbox(0)
 	v.add_child(big_text(title, UI.GOLD))
 	v.add_child(UI.spacer(0, 2))
-	v.add_child(UI.label(text, 8, UI.TEXT, "body"))
+	var l := UI.label(text, 8, UI.TEXT, "body")
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # (wraps in its panel, never widens it)
+	v.add_child(l)
 	return v

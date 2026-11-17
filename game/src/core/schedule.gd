@@ -40,16 +40,6 @@ const SHORT_NAMES := {"conf_qf": "CONF QF", "conf_semi": "CONF SF", "conf_final"
 	"nat_r1": "NCSA R1", "nat_qf": "NCSA QF", "nat_sf": "NCSA SF", "nat_final": "NCSA FINAL"}
 ## Rounds played at a neutral site.
 const NEUTRAL_KINDS := ["nat_sf", "nat_final"]
-## THE NCSA DIVISION III CHAMPIONSHIP: a separate four-team tournament, played in the weeks of the
-## NCSA's first two rounds, so the calendar is the same whoever's on it. Its games are in those
-## rounds' lists, marked `k` with their own kind (game_kind), never `kind`: everything that reads
-## the NCSA by round (its bracket, its awards, its poll) reads only its own games. The semifinals
-## are at the better seed's pool; the final and the third-place game at a neutral site.
-const D3_FIELD := 4
-const D3_NAMES := {"d3_sf": "NCSA DIVISION III SEMIFINAL", "d3_final": "NCSA DIVISION III NATIONAL CHAMPIONSHIP", "d3_third": "NCSA DIVISION III THIRD-PLACE GAME"}
-const D3_SHORT := {"d3_sf": "D3 SF", "d3_final": "D3 FINAL", "d3_third": "D3 3RD"}
-const D3_SEMI_ROUND := "nat_r1"    # the week of its semifinals...
-const D3_FINAL_ROUND := "nat_qf"   # ...and of its final
 
 static func build(teams: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var games := regular_games(teams, rng)
@@ -376,13 +366,9 @@ static func _put(g: Dictionary, w: int, d: int, busy: Dictionary, per_week: Dict
 static func _game(a: String, b: String, a_home: bool) -> Dictionary:
 	return {"h": a if a_home else b, "a": b if a_home else a, "r": null, "d": 1}
 
-## What a game is in the postseason: its own `k` (the Division III tournament), else its round's kind.
-static func game_kind(round: Dictionary, g: Dictionary) -> String:
-	return String(g.get("k", round.get("kind", "")))
-
-## The round's games of the NCSA itself (a round can also carry Division III's).
-static func nat_games(round: Dictionary) -> Array:
-	return (round.games as Array).filter(func(g): return not g.has("k"))
+## What a game is in the postseason: its round's kind.
+static func game_kind(round: Dictionary, _g: Dictionary) -> String:
+	return String(round.get("kind", ""))
 
 ## A neutral-site game: no home pool for either team.
 static func is_neutral(g: Dictionary) -> bool:
@@ -426,8 +412,6 @@ static func is_conf_game(round: Dictionary, g: Dictionary) -> bool:
 
 ## What a game is, for the screens: the playoff round, or conference / non-conference.
 static func game_label(round: Dictionary, g: Dictionary) -> String:
-	if g.has("k"):
-		return String(D3_NAMES.get(String(g.k), ""))
 	if is_playoff(round) or String(round.get("kind", "")) != "reg":
 		return String(round.get("name", ""))
 	return "CONFERENCE" if is_conf_game(round, g) else "NONCONFERENCE"
@@ -446,11 +430,22 @@ static func score_text(g: Dictionary, h_first: bool = true) -> String:
 	if g.r == null:
 		return "-"
 	var s: Array = g.r.s
-	var t := "%d-%d" % [s[0], s[1]] if h_first else "%d-%d" % [s[1], s[0]]
-	if not (g.r.so as Array).is_empty():
-		var so: Array = g.r.so
-		t += " (%d-%d P)" % ([so[0], so[1]] if h_first else [so[1], so[0]])
-	return t
+	var so: Array = g.r.so
+	if not h_first:
+		s = [s[1], s[0]]
+		so = [] if so.is_empty() else [so[1], so[0]]
+	return final_text(s, so)
+
+## A final score: "9-7", or after a shootout each side's goals with its shootout goals in
+## brackets, "10(3)-10(2)". `sep` goes between the two sides.
+static func final_text(s: Array, so: Array, sep: String = "-") -> String:
+	return side_text(s, so, 0) + sep + side_text(s, so, 1)
+
+## One side's part of final_text: "10", or "10(3)" after a shootout.
+static func side_text(s: Array, so: Array, side: int) -> String:
+	if so.size() == 2:
+		return "%d(%d)" % [int(s[side]), int(so[side])]
+	return str(int(s[side]))
 
 # ------------------------------------------------------------------ standings
 static func empty_row() -> Dictionary:
@@ -589,24 +584,14 @@ static func fill_playoff(rounds: Array, index: int, teams: Dictionary, table: Di
 			var poll: Dictionary = Poll.latest_of(polls)
 			if poll.is_empty() or int(poll.wk) != index - 1:
 				poll = Poll.make(teams, rounds, index - 1, season.get("poll_prior", Poll.hierarchy(teams)), poll)
-			# only Division I and the one Division II champion can be in the NCSA's field: a
-			# Division III team is never in it, however high it's ranked
-			var autos := nat_autos(teams, champs)
-			var ranks: Array = (poll.ranks as Array).filter(func(id): return Colleges.division((teams[id] as PoloTeam).conf) == Colleges.D1 or id in autos)
-			var field := select_field(ranks, autos, mini(NCSA_FIELD, size))
-			season["at_large"] = field.filter(func(id): return not id in autos)
+			var field := select_field(poll.ranks, champs, mini(NCSA_FIELD, size))
+			season["at_large"] = field.filter(func(id): return not id in champs)
 			season["nat_seeds"] = field
 			season["nat_slots"] = _slots(field, size)
 			games = _slot_games(season.nat_slots, field)
-			for id in champs:
-				if String((teams[id] as PoloTeam).conf) == Colleges.D2_CONF:
-					season["d2_champ"] = id
-			games.append_array(_draw_d3(teams, poll.ranks, champs, season))
 		elif season.has("nat_slots"):
 			season["nat_slots"] = _advance(season.nat_slots, prev.games)
 			games = _slot_games(season.nat_slots, season.nat_seeds)
-			if kind == D3_FINAL_ROUND:
-				games.append_array(_d3_final(prev, season))
 		else:
 			var seeds: Array = season.get("nat_seeds", [])
 			for i in range(0, prev.games.size(), 2):
@@ -624,71 +609,8 @@ static func fill_playoff(rounds: Array, index: int, teams: Dictionary, table: Di
 static func tournament_confs(teams: Dictionary) -> Array:
 	return Colleges.conf_ids_of(teams).filter(func(cid): return teams.keys().filter(func(id): return (teams[id] as PoloTeam).conf == cid).size() >= 2)
 
-## The NCSA's automatic bids out of this year's tournament champions: Division I's, and Division
-## II's one (the WWPA's champion; no other Division II team can be in the field). Division III's
-## champions go to their own tournament.
-static func nat_autos(teams: Dictionary, champs: Array) -> Array:
-	return champs.filter(func(id): return Colleges.division((teams[id] as PoloTeam).conf) != Colleges.D3)
-
-## THE DIVISION III FIELD from the SELECTION poll: the SCIAC and MPSF East champions (automatic
-## bids), then the best-ranked other Division III teams until there are four, nobody twice; seeded
-## by the poll, whoever got in how. [] with no Division III in this dynasty.
-static func d3_field(teams: Dictionary, ranks: Array, champs: Array) -> Array:
-	var d3: Array = ranks.filter(func(id): return Colleges.division((teams[id] as PoloTeam).conf) == Colleges.D3)
-	if d3.size() < D3_FIELD:
-		return []
-	var field: Array = champs.filter(func(id): return id in d3)
-	for id in d3:
-		if field.size() >= D3_FIELD:
-			break
-		if not id in field:
-			field.append(id)
-	field.sort_custom(func(x, y): return ranks.find(x) < ranks.find(y))
-	return field
-
-## The Division III semifinals (1 v 4, 2 v 3), and the season's record of how it was drawn.
-static func _draw_d3(teams: Dictionary, ranks: Array, champs: Array, season: Dictionary) -> Array:
-	var field := d3_field(teams, ranks, champs)
-	if field.is_empty():
-		return []
-	season["d3_seeds"] = field
-	season["d3_at_large"] = field.filter(func(id): return not id in champs)
-	season["d3_slots"] = _slots(field, D3_FIELD)
-	return _d3_marked(_slot_games(season.d3_slots, field), "d3_sf")
-
-static func _d3_marked(games: Array, k: String) -> Array:
-	for g in games:
-		g["k"] = k
-		g["nu"] = k != "d3_sf"
-		if not g.nu:
-			g.erase("nu")
-	return games
-
-## The Division III final, and its semifinal losers' third-place game (it decides nothing else).
-static func _d3_final(prev: Dictionary, season: Dictionary) -> Array:
-	if not season.has("d3_slots"):
-		return []
-	var semis: Array = (prev.games as Array).filter(func(g): return String(g.get("k", "")) == "d3_sf")
-	var seeds: Array = season.d3_seeds
-	var losers: Array = semis.map(func(g): return loser(g))
-	season["d3_slots"] = _advance(season.d3_slots, semis)
-	season["d3_third"] = losers
-	var out: Array = _d3_marked(_slot_games(season.d3_slots, seeds), "d3_final")
-	if losers.size() == 2:
-		out.append_array(_d3_marked([_game(losers[0], losers[1], seeds.find(losers[0]) <= seeds.find(losers[1]))], "d3_third"))
-	return out
-
-## The game of Division III kind `k` ("d3_final"...), {} if it isn't there yet.
-static func d3_game(rounds: Array, k: String) -> Dictionary:
-	for r in rounds:
-		for g in r.games:
-			if String(g.get("k", "")) == k:
-				return g
-	return {}
-
-## This season's finals as history: [{key, tournament, champion, runner_up, score}], key "nat", "d3",
-## "d2" or "conf:<id>". The WWPA's final is two entries, its own and the Division II Championship:
-## one game, two achievements.
+## This season's finals as history: [{key, tournament, champion, runner_up, score}], key "nat" or
+## "conf:<id>".
 static func finals(rounds: Array, teams: Dictionary) -> Array:
 	var out: Array = []
 	var add := func(key: String, name: String, g: Dictionary) -> void:
@@ -697,15 +619,9 @@ static func finals(rounds: Array, teams: Dictionary) -> Array:
 		for g in r.games:
 			if g.r == null:
 				continue
-			if String(g.get("k", "")) == "d3_final":
-				add.call("d3", "NCSA DIVISION III CHAMPIONSHIP", g)
-			elif g.has("k"):
-				continue
-			elif String(r.kind) == "conf_final":
+			if String(r.kind) == "conf_final":
 				var cf := String((teams[winner(g)] as PoloTeam).conf)
 				add.call("conf:" + cf, "%s CHAMPIONSHIP" % Colleges.conf_abbr(cf), g)
-				if cf == Colleges.D2_CONF:
-					add.call("d2", "DIVISION II CHAMPIONSHIP", g)
 			elif String(r.kind) == "nat_final":
 				add.call("nat", "NCSA CHAMPIONSHIP", g)
 	return out
@@ -729,15 +645,11 @@ static func alive(season: Dictionary, round: Dictionary, id: String, conf: Strin
 	if kind.begins_with("conf_"):
 		return id in (season.get("conf_slots", {}).get(conf, []) as Array)
 	if kind.begins_with("nat_"):
-		if id in (season.get("nat_slots", []) as Array):
-			return true
-		return kind in [D3_SEMI_ROUND, D3_FINAL_ROUND] and (id in (season.get("d3_slots", []) as Array) or id in (season.get("d3_third", []) as Array))
+		return id in (season.get("nat_slots", []) as Array)
 	return false
 
 ## The seed shown next to a playoff team, or 0.
 static func seed_of(season: Dictionary, kind: String, id: String, conf: String) -> int:
-	if id in (season.get("d3_seeds", []) as Array):
-		return (season.d3_seeds as Array).find(id) + 1
 	if kind.begins_with("nat"):
 		return (season.get("nat_seeds", []) as Array).find(id) + 1
 	if kind.begins_with("conf_"):

@@ -1,4 +1,5 @@
 extends RefCounted
+const HotBadge := preload("res://src/ui/hot_badge.gd")
 ## Fixed roster geometry and UI state derived from saved player data.
 
 const ROSTER := preload("res://src/ui/screens/roster.gd")
@@ -144,7 +145,7 @@ func _card_info(runner: Node, career: Career) -> void:
 	UI.drawn_log = null
 	runner.check(log.has(hot.short_name()) and log.has(hot.year_text()) and log.has(Deck.pos_tag(hot)) and log.has("#%d" % hot.number),
 		"a card: name, class year, position, cap number")
-	runner.check(log.has("VERY") and log.has("HOT") and not log.any(func(s): return String(s).contains("HO.")), "VERY HOT shows whole, never cut short")
+	runner.check(not log.has("VERY") and not log.has("HOT"), "VERY HOT: no words on the card, his red stars burn instead")
 	var src := FileAccess.get_file_as_string("res://src/ui/screens/roster.gd")
 	var body := src.substr(src.find("static func paint_card("), src.find("static func xp_fill(") - src.find("static func paint_card("))
 	runner.check(not body.contains("tokens") and not body.contains("status_badge") and not log.any(func(s): return String(s).contains("UPGRADE")),
@@ -262,6 +263,8 @@ func _pixels(runner: Node, career: Career) -> void:
 	var red := true
 	var at := Vector2i(int(cr.position.x + ROSTER.STAR_X + Deck.star_x(4)), int(cr.position.y + ROSTER.STAR_Y))
 	for c: Vector2i in _cells(Deck.STAR_INNER):
+		if HotBadge.CORE.has(c):
+			continue   # (the fire's hot core glows in its middle)
 		red = red and _near(img.get_pixelv(at + c), PlayerForm.FIRE_RED)
 	runner.check(red and is_equal_approx(probe.stars, 3.5), "HOT: a red star of the same shape after the half gold one, CURRENT still 3.5")
 	probe.heat = 0
@@ -275,18 +278,36 @@ func _pixels(runner: Node, career: Career) -> void:
 	var after := (await _shot(runner)).get_region(Rect2i(Vector2i(cr.position), Vector2i(102, int(ROSTER.XP_Y))))
 	runner.check(before.get_data() == after.get_data(), "two unspent tokens: the card looks exactly the same (no badge)")
 	probe.tokens = 0
-	# hurt: nine red pixels (the cross), the panels as they were
+	# hurt: the medical cross under his cap number (still in tests: its normal red), a red border,
+	# the panels a touch darker red; healed, all of it gone
 	Development.injure(probe, RandomNumberGenerator.new(), "minor")
 	card.queue_redraw()
 	img = await _shot(runner)
+	var cx := int(ROSTER.CARD.x - ROSTER.CROSS_X - 5.0)
+	var cy := int(ROSTER.CROSS_Y)
+	var cross_ok := true
+	for y in ROSTER.CROSS.size():
+		var row: String = ROSTER.CROSS[y]
+		for x in row.length():
+			if row[x] == "r" and not _near(_px(img, cr, cx + x, cy + y), ROSTER.INJURY):
+				cross_ok = false
+			elif row[x] == "w" and not _near(_px(img, cr, cx + x, cy + y), UI.TEXT):
+				cross_ok = false
 	var reds := 0
 	for y in int(ROSTER.CARD.y):
 		for x in 102:
 			reds += 1 if _near(_px(img, cr, x, y), ROSTER.INJURY) else 0
-	runner.check(reds == 9 and _near(_px(img, cr, 50, 1), ROSTER.TOP_BG) and _near(_px(img, cr, 0, 20), UI.TEXT),
-		"injured: a small red cross (%d px), no tint, overlay or red border" % reds)
+	runner.check(cross_ok and reds >= 25, "injured: the big medical cross, red with a white outline (%d red px)" % reds)
+	runner.check(_near(_px(img, cr, 0, 20), ROSTER.INJURY_EDGE) and _near(_px(img, cr, 101, 50), ROSTER.INJURY_EDGE),
+		"injured: a thin red border")
+	runner.check(_near(_px(img, cr, 50, 1), ROSTER.hurt_tint(ROSTER.TOP_BG)) and not _near(_px(img, cr, 50, 1), ROSTER.TOP_BG),
+		"injured: the panels lean dark red")
 	Development.heal(probe)
 	card.queue_redraw()
+	img = await _shot(runner)
+	runner.check(_near(_px(img, cr, 0, 20), UI.TEXT) and _near(_px(img, cr, 50, 1), ROSTER.TOP_BG)
+			and not _near(_px(img, cr, cx + 4, cy + 4), ROSTER.INJURY),
+		"healed: no cross, tint or red border")
 	# phone and tablet shapes: the same table, every card on screen, nothing scrolls
 	var win := DisplayServer.window_get_size()
 	for sz in [Vector2i(1170, 540), Vector2i(1334, 750), Vector2i(1024, 768)]:

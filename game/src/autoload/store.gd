@@ -1,15 +1,17 @@
 extends Node
-## Store: in-app purchases. Pixel Polo + (one-time unlock) and Yellow Coin packs.
+## Store: in-app purchases. Pixel Polo + (one-time unlock) and Polo Points packs.
 ## Ported from Retro Swim with the same product ids, so its App Store setup steps carry over.
 ##
 ## Backends (picked at startup):
-##   * StoreKit 2 on iOS          - godot-storekit2 plugin (class GodotStoreKit2)
+##   * StoreKit 2 on iOS          - the maintained OpenIAP "godot-iap" plugin (backend_openiap.gd,
+##                                   autoload GodotIapPlugin), or the private godot-storekit2 build
+##                                   from Retro Swim (class GodotStoreKit2) if that's installed
 ##   * Google Play Billing        - GodotGooglePlayBilling plugin (JNI singleton)
 ##   * Test store in the editor   - no money, clearly labelled; never in an exported game (web,
 ##                                   desktop or phone: those have a real store or none)
 ## A phone build without its plugin has no store: buttons say so instead of faking purchases.
 ##
-## ONE CURRENCY: YELLOW COINS (Wallet has the rules). What's bought here is `bank`, a CoinVault in
+## ONE CURRENCY: POLO POINTS (PP; once Yellow Coins: same balance, same save keys) (Wallet has the rules). What's bought here is `bank`, a CoinVault in
 ## user://store.cfg (never in a career save): shared by every career, spent once, never lost to a
 ## new career, a deleted one or RESET. Blue Coins are gone: EconomyMigration converted them, once
 ## per account (`econ_v`); `ledger` is their old vault, kept for the Coin Exchange's history.
@@ -22,6 +24,7 @@ extends Node
 signal products_updated
 signal state_changed
 signal purchase_finished(product_id: String, ok: bool, message: String)
+signal spin_claimed(result: Dictionary)   # a LUCKY SPIN paid: {txn, seg, pp, test}
 
 const SAVE_PATH := "user://store.cfg"
 
@@ -29,11 +32,13 @@ const PRO_ID := "pro_unlock"
 const TEAMS_ID := "all_teams_unlock"
 ## One-time unlocks the store keeps track of (the rest are consumables): owned for good, restored
 ## on a new device, never bought twice.
-const NON_CONSUMABLES := ["pro_unlock", "all_teams_unlock", "division2_pack", "division3_pack"]
+const NON_CONSUMABLES := ["pro_unlock", "all_teams_unlock"]
 const STARTER_ID := "starter_pack"
 const PLAYOFF_ID := "playoff_bundle"
-## The four Yellow Coin packs on sale. (Their ids stay blue_*: a product id can't change once it's
-## on the App Store and Play Console; the coins are the old Blue Coin amounts x 5.)
+## The four Polo Points packs on sale. (Their ids stay blue_*: a product id can't change once it's
+## on the App Store and Play Console. The Polo Points Economy update set what they give:
+## 60 / 180 / 350 / 800 PP at the same four prices. A consumable's amount is the game's to decide,
+## so the products themselves didn't change; only their store listings' text must (docs/SPEC.md, 4).)
 ## The older products stay in PRODUCTS only so a purchase still pending on the store's side
 ## arrives; nothing sells them.
 const PACK_IDS := ["blue_100", "blue_350", "blue_650", "blue_1400"]
@@ -43,12 +48,10 @@ const PACK_IDS := ["blue_100", "blue_350", "blue_650", "blue_1400"]
 const PRODUCTS := {
 	"pro_unlock": {"type": "pro", "title": "PIXEL POLO +", "usd": 7.99},
 	"all_teams_unlock": {"type": "teams", "title": "ALL 30 TEAMS", "usd": 2.99},
-	"division2_pack": {"type": "division", "pack": "div2", "title": "DIVISION II EXPANSION PACK", "usd": 2.99},
-	"division3_pack": {"type": "division", "pack": "div3", "title": "DIVISION III EXPANSION PACK", "usd": 3.99},
-	"blue_100": {"type": "pack", "title": "STARTER PACK", "credits": 500, "usd": 1.99},
-	"blue_350": {"type": "pack", "title": "GAMEDAY PACK", "credits": 1750, "usd": 5.99},
-	"blue_650": {"type": "pack", "title": "ALL-STAR PACK", "credits": 3250, "usd": 9.99},
-	"blue_1400": {"type": "pack", "title": "LEGENDARY PACK", "credits": 7000, "usd": 19.99},
+	"blue_100": {"type": "pack", "title": "STARTER PACK", "credits": 60, "usd": 1.99},
+	"blue_350": {"type": "pack", "title": "GAMEDAY PACK", "credits": 180, "usd": 5.99},
+	"blue_650": {"type": "pack", "title": "ALL-STAR PACK", "credits": 350, "usd": 9.99},
+	"blue_1400": {"type": "pack", "title": "LEGENDARY PACK", "credits": 800, "usd": 19.99},
 	"credits_100": {"type": "pack", "title": "HANDFUL", "credits": 100, "usd": 0.99},
 	"credits_250": {"type": "pack", "title": "BALL BAG", "credits": 250, "usd": 1.99},
 	"credits_700": {"type": "pack", "title": "CAP RACK", "credits": 700, "usd": 4.99, "badge": "COACH'S PICK"},
@@ -58,34 +61,31 @@ const PRODUCTS := {
 	"starter_pack": {"type": "starter", "title": "STARTER PACK", "credits": 600, "usd": 1.99},
 	"playoff_bundle": {"type": "playoff", "title": "PLAYOFF BUNDLE", "credits": 900, "usd": 4.99},
 }
-## What PIXEL POLO + gives (the shop's card and wherever a PRO feature is locked), both division
-## packs among it (division_access).
-const PRO_COINS := 500                # once per legitimate purchase: pro_coins
+## What PIXEL POLO + gives (the shop's card and wherever a PRO feature is locked).
+const PRO_COINS := 200                # once per legitimate purchase: pro_coins (500 before the Polo Points Economy update)
 const PRO_PERKS := [
-	"500 Yellow Coins",
+	"200 Polo Points",
 	"Player Name & Number Customization",
-	"Division II Expansion Pack",
-	"Division III Expansion Pack",
 ]
-## The expansion packs. Each is a real one-time product, but it's only for sale once the platform
-## has confirmed it with a price (division_for_sale): until the product exists in App Store Connect
-## and Play Console the shop says COMING SOON and nothing can be bought. `usd` is the planned list
-## price, never charged or shown from here. Ownership (division_access) is the account's; which
-## dynasties use a pack is each career's own (Career.divisions).
-const DIVISIONS := {
-	"div2": {"title": "DIVISION II EXPANSION PACK", "tag": "DIVISION II", "product": "division2_pack", "div": 2, "usd": 2.99, "desc": "Seven WWPA programs, and the Division II Championship with its NCSA bid."},
-	"div3": {"title": "DIVISION III EXPANSION PACK", "tag": "DIVISION III", "product": "division3_pack", "div": 3, "usd": 3.99, "desc": "Seventeen SCIAC, MPSF East and NWPC programs, and the NCSA Division III Championship."},
-}
 const GOLD_CAP := "ffcf3f"
 
 var pro := false
-var packs: Array = []                 # the division packs bought ("div2", "div3"; Pixel Polo + owners have both anyway)
 var all_teams := false                # ALL 30 TEAMS owned: every school open on the Road to Glory (Progression.is_unlocked)
 var pro_coins := false                # PRO's coins have been paid (or never will be): never again
 var econ_v := 0                       # EconomyMigration's version on this account
-var bank := CoinVault.new()           # the shared YELLOW COINS: bought, converted, refunded, granted
+var bank := CoinVault.new()           # the shared POLO POINTS: bought, converted, refunded, granted
 var ledger := CoinVault.new()         # the retired Blue Coin vault: the old exchange's history, no balance
 var looks := VisualUpgrades.new()     # the visual upgrades owned (account-wide)
+## LUCKY SPIN (LuckySpin): one allowance per account, in this file, never in a career save.
+var spin := LuckySpin.new()
+## Developer Mode's TEST AD & SPIN (editor only): its own allowance and its own wallet, in memory,
+## so a test spin never touches the real Polo Points or the real cooldown. `spin_test_skip` is the
+## test clock's head start (accelerated cooldowns).
+var spin_test := LuckySpin.new()
+var spin_test_bank := CoinVault.new()
+var spin_test_skip := 0
+var spin_test_force := -1             # the test wheel's next slice (-1: drawn like any spin)
+var _spin_rng := RandomNumberGenerator.new()
 ## The shared coins' balance (bank.balance), for reading; Wallet spends it.
 var vault: int:
 	get:
@@ -103,7 +103,7 @@ var _pending: Array = []              # product ids waiting on approval (Ask to 
 var _prices := {}                     # product id -> localized price string from the store
 var _inflight := ""                   # product id the player is buying right now
 var _backend = null
-var backend_name := "none"            # storekit | play | test | none
+var backend_name := "none"            # storekit | openiap | play | test | none
 ## After RESET GAME (reset_all): the store's own word that one-time unlocks are owned (its startup
 ## sync, a re-announced transaction) is set aside, so the reset really leaves the game without
 ## them; RESTORE PURCHASES (or buying again) brings them back, as on a new device.
@@ -113,7 +113,7 @@ var hold_owned := false
 func seen(txn: String) -> bool:
 	return bank.seen(txn) or ledger.seen(txn)
 
-## Buys a visual upgrade's next tier with Yellow Coins: the coins and the unlock in one go, and
+## Buys a visual upgrade's next tier with Polo Points: the coins and the unlock in one go, and
 ## both files written at once, so reloading can't keep the one without the other. "" or why not.
 func buy_tier(id: String, c: Career = Game.career) -> String:
 	var why := looks.buy_tier(id, c)
@@ -122,40 +122,39 @@ func buy_tier(id: String, c: Career = Game.career) -> String:
 		Game.save_career()
 	return why
 
+## Buys a Goal Celebration (any one, in any order: VisualUpgrades.buy_celeb), saved as buy_tier.
+func buy_celeb(n: int, c: Career = Game.career) -> String:
+	var why := looks.buy_celeb(n, c)
+	if why == "":
+		vault_changed()
+		Game.save_career()
+	return why
+
+## Equips an owned Goal Celebration (saved at once).
+func equip_celeb(n: int) -> void:
+	if looks.equip_celeb(n):
+		vault_changed()
+
 func equip_level(id: String, lv: int) -> void:
 	if looks.equip(id, lv):
 		vault_changed()
 
-## Does this account have division pack `id` ("div2", "div3"): bought, or with Pixel Polo +. Only a
-## verified purchase or restore ever sets either.
-## With the lower divisions hibernated (Colleges.ENABLE_LOWER_DIVISIONS) no pack is in the game: the
-## purchase record (`packs`, PRO) is kept as it is and counts again once they're back.
-func division_access(id: String) -> bool:
-	return DIVISIONS.has(id) and Colleges.division_enabled(int(DIVISIONS[id].div)) and (pro or id in packs)
-
-## The same by division number (Colleges.D2, D3); Division I is the base game.
-func division_owned(d: int) -> bool:
-	return d == Colleges.D1 or division_access("div%d" % d)
-
-## Can the pack be bought now: only once the platform's store has confirmed the product with a
-## price. Nothing else ever opens the button, the editor's test store included. (Hibernated: never.)
-func division_for_sale(id: String) -> bool:
-	return DIVISIONS.has(id) and Colleges.division_enabled(int(DIVISIONS[id].div)) and available() and _prices.has(String(DIVISIONS[id].product))
-
-## The packs the shop lists: none while the lower divisions are hibernated.
-func listed_divisions() -> Array:
-	return DIVISIONS.keys().filter(func(id): return Colleges.division_enabled(int(DIVISIONS[id].div)))
-
-## What PIXEL POLO + gives, as the screens list it: PRO_PERKS less any hibernated division's pack.
+## What PIXEL POLO + gives, as the screens list it.
 func pro_perks() -> Array:
-	return PRO_PERKS.filter(func(x): return not String(x).begins_with("Division") or Colleges.lower_divisions)
+	return PRO_PERKS.duplicate()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_spin_rng.randomize()
 	_load()
+	var phone := OS.get_name() == "iOS" or OS.get_name() == "Android"
 	if ClassDB.class_exists("GodotStoreKit2"):
 		_backend = load("res://src/store/backend_storekit.gd").new(self)
 		backend_name = "storekit"
+	elif phone and load("res://src/store/backend_openiap.gd").plugin_present(get_tree()):
+		# the maintained OpenIAP plugin (godot-iap): StoreKit 2 on iOS, Play Billing on Android
+		_backend = load("res://src/store/backend_openiap.gd").new(self)
+		backend_name = "openiap"
 	elif Engine.has_singleton("GodotGooglePlayBilling"):
 		_backend = load("res://src/store/backend_play.gd").new(self)
 		backend_name = "play"
@@ -164,6 +163,16 @@ func _ready() -> void:
 		backend_name = "test"
 	if _backend != null:
 		_backend.start(PRODUCTS.keys())
+	Ads.reward_earned.connect(_on_ad_reward)
+
+## A rewarded ad's reward, wherever the player is: the spin is claimed and paid here at once (the
+## wheel, open or opened later, shows it: LuckySpin.pending).
+func _on_ad_reward(txn: String) -> void:
+	var test := spin_testing()
+	var out := claim_spin(txn, test, spin_test_force if test else -1)
+	if not out.is_empty():
+		out["test"] = test
+		spin_claimed.emit(out)
 
 # ------------------------------------------------------------------ queries
 func available() -> bool:
@@ -182,8 +191,7 @@ func owns(id: String) -> bool:
 			return pro
 		TEAMS_ID:
 			return all_teams
-	var pack := String(product(id).get("pack", ""))
-	return pack != "" and pack in packs
+	return false
 
 func credits_of(id: String) -> int:
 	return int(product(id).get("credits", 0))
@@ -289,8 +297,6 @@ func _on_revoked(id: String) -> void:
 		pro = false
 	elif id == TEAMS_ID and all_teams:
 		all_teams = false   # (refunded: back to the schools earned on the Road to Glory)
-	elif String(product(id).get("pack", "")) in packs:
-		packs.erase(String(product(id).pack))   # (a dynasty already playing it keeps its teams)
 	else:
 		return
 	_save()
@@ -320,9 +326,6 @@ func _grant(id: String, why: String, token: String = "") -> void:
 			pro_coins = true
 		"teams":
 			all_teams = true   # (only who you can pick: no achievement, no roster, no rating changes)
-		"division":
-			if not String(p.pack) in packs:
-				packs.append(String(p.pack))   # (no coins, no teams here: a dynasty adds them itself)
 		"pack", "starter", "playoff":
 			if not bank.credit(int(p.credits), token, String(p.get("title", id))):
 				return   # (that transaction was already credited)
@@ -352,14 +355,55 @@ func _apply_playoff() -> void:
 	c.add_news("PLAYOFF BUNDLE: ice baths, physio, a pep rally. The whole team is fit and fired up.")
 	Game.save_career()
 
+# ------------------------------------------------------------------ LUCKY SPIN
+## Is the editor's test wheel in use (TEST AD & SPIN)? Only where the test store is: never in an
+## exported game.
+func spin_testing() -> bool:
+	return OS.has_feature("editor") and Ads.backend_name == "test"
+
+func spin_state(test: bool = spin_testing()) -> LuckySpin:
+	return spin_test if test else spin
+
+## The clock the allowance runs on (the test wheel's runs ahead by spin_test_skip).
+func spin_now(test: bool = spin_testing()) -> int:
+	return int(Time.get_unix_time_from_system()) + (spin_test_skip if test else 0)
+
+## A rewarded ad finished with its reward (Ads.reward_earned): one spin, decided and credited here,
+## saved in the same write, before the wheel moves, so a crash mid-animation can neither lose it nor
+## pay it twice (the next shop visit shows it: LuckySpin.pending). {} when nothing is paid.
+## `seg` forces a slice: the test wheel only.
+func claim_spin(txn: String, test: bool, seg: int = -1) -> Dictionary:
+	var st := spin_state(test)
+	var out := st.claim(txn, spin_now(test), _spin_rng, seg if test else -1)
+	if out.is_empty():
+		return out
+	var v := spin_test_bank if test else bank
+	if not v.credit(int(out.pp), "spin:" + txn, "LUCKY SPIN", "ad_reward"):
+		return {}
+	if not test:
+		receipts.append({"id": "lucky_spin", "credits": int(out.pp), "why": "ad", "txn": txn, "t": spin_now(false)})
+		if receipts.size() > 50:
+			receipts = receipts.slice(receipts.size() - 50)
+		_save()
+	return out
+
+## The wheel has shown its result: the header's balance may move now.
+func spin_shown(test: bool) -> void:
+	var st := spin_state(test)
+	if st.pending.is_empty():
+		return
+	st.pending = {}
+	if not test:
+		_save()
+	state_changed.emit()
+
 # ------------------------------------------------------------------ persistence
 func _load() -> void:
 	var cf := ConfigFile.new()
-	if cf.load(SAVE_PATH) != OK:
+	if SafeFile.load_config(cf, SAVE_PATH) != OK:   # (damaged: its previous good copy)
 		return
 	pro = cf.get_value("s", "pro", false)
 	all_teams = cf.get_value("s", "all_teams", false)
-	packs = cf.get_value("s", "packs", [])
 	bank = CoinVault.from_dict({"balance": int(cf.get_value("s", "vault", 0)), "credited": cf.get_value("s", "tokens", []),
 		"open": cf.get_value("s", "open_txns", []), "sources": cf.get_value("s", "sources", {})})
 	ledger = CoinVault.from_dict({"balance": int(cf.get_value("s", "blue", 0)), "credited": cf.get_value("s", "blue_tokens", []),
@@ -376,6 +420,7 @@ func _load() -> void:
 	receipts = cf.get_value("s", "receipts", [])
 	_pending = cf.get_value("s", "pending", [])
 	hold_owned = cf.get_value("s", "hold_owned", false)
+	spin = LuckySpin.from_dict(cf.get_value("s", "spin", {}))
 	migrate_economy()
 
 ## EconomyMigration on this account; saved in the one write that marks it done.
@@ -397,7 +442,6 @@ func _save() -> void:
 	cf.set_value("s", "econ_v", econ_v)
 	cf.set_value("s", "sources", bank.sources)
 	cf.set_value("s", "all_teams", all_teams)
-	cf.set_value("s", "packs", packs)
 	cf.set_value("s", "vault", bank.balance)
 	cf.set_value("s", "open_txns", bank.open)
 	cf.set_value("s", "blue", ledger.balance)
@@ -415,29 +459,31 @@ func _save() -> void:
 	cf.set_value("s", "tokens", bank.credited)
 	cf.set_value("s", "pending", _pending)
 	cf.set_value("s", "hold_owned", hold_owned)
-	cf.save(SAVE_PATH)
+	cf.set_value("s", "spin", spin.to_dict())
+	# write, verify, rename (SafeFile): purchased Polo Points and unlocks are never left half-written
+	SafeFile.save_config(cf, SAVE_PATH)
 
-## RESET GAME (Settings): PRO, ALL 30 TEAMS and the starter / playoff offers are gone from the
-## game; one-time unlocks stay away until RESTORE PURCHASES (or buying again) asks for them
-## (hold_owned). SHARED COINS STAY: no store can restore consumable coins, so they, their records
-## of credited transactions and the receipts are kept (anything a deleted career had taken without
-## saving refunded first), and so are the visual upgrades, the old exchange's history, and that
-## PRO's coins have been paid.
+## RESET EVERYTHING (DEV screen): PRO, ALL 30 TEAMS, the starter / playoff offers, the purchased
+## Polo Points and every visual upgrade are gone from the game; one-time unlocks stay away until
+## RESTORE PURCHASES (or buying again) asks for them (hold_owned). Consumable coins can't be
+## restored by any store, so they're gone for good. Kept: the list of store transactions already
+## credited (so a re-announced purchase can't pay its coins again), the receipts, the old
+## exchange's history, that PRO's coins have been paid, and the LUCKY SPIN allowance (a reset
+## never hands out spins).
 func reset_all() -> void:
-	bank.reconcile("*")
-	var kept := bank
+	var kept_txns := bank.credited
 	var kept_ledger := ledger
-	var kept_looks := looks
 	var kept_receipts := receipts
 	var kept_coins := pro_coins
 	var kept_v := econ_v
+	var kept_spin := spin
 	reset_for_tests()
-	bank = kept
+	bank.credited = kept_txns
 	ledger = kept_ledger
-	looks = kept_looks
 	receipts = kept_receipts
 	pro_coins = kept_coins
 	econ_v = kept_v
+	spin = kept_spin
 	hold_owned = true
 	_save()
 	state_changed.emit()
@@ -446,7 +492,6 @@ func reset_all() -> void:
 func reset_for_tests() -> void:
 	pro = false
 	all_teams = false
-	packs = []
 	pro_coins = false
 	econ_v = EconomyMigration.VERSION
 	bank = CoinVault.new()
@@ -462,3 +507,7 @@ func reset_for_tests() -> void:
 	_pending = []
 	_inflight = ""
 	hold_owned = false
+	spin = LuckySpin.new()
+	spin_test = LuckySpin.new()
+	spin_test_bank = CoinVault.new()
+	spin_test_skip = 0

@@ -30,7 +30,8 @@ var called := 0.0           # attacker: seconds left of a called drive's burst
 var back_off := 0.0         # defender: seconds of giving room after a foul
 var guard_on: Swimmer = null   # defender: the man with the ball he's pressing right now...
 var guard_t := 0.0             # ...and for how many unbroken seconds (see Play._guard_clock)
-var out := false            # excluded: swimming to the re-entry corner
+var out := false            # excluded: swimming to the exclusion box (Geo.REENTRY) and waiting there
+var rejoin := false         # let back in: swimming in from the box, out of the field until he's in it
 var cside := 0              # the centre's guard: the side of him he's holding (-1, +1; 0 not yet)
 var cside_t := 0.0          # ...how long the ball's been on the other side
 var cswitch := 0.0          # ...seconds left of going round behind him to the new side
@@ -46,7 +47,10 @@ var cdef_next := 0.0        # ...seconds until he weighs it up again
 var cdef_cool := 0.0        # ...seconds until he can go for the ball again
 var ai_err := Vector2.ZERO  # defender: how far off his spot he's reading it right now (Difficulty "pos_err")
 var pace := 1.0             # share of his top speed he swims at: a defender's Defense (DefenseFormation.move_mult)
+var surge := 1.0            # the counterattack's extra speed (Play.counter_surge): set fresh every frame, never stacked
 var dtag := ""              # defender: the tag of the man he was paired with (his assignment: D1..D5, D6 = "C")
+var two_md := false         # defender: he's in his team's 2MD place (PoloTeam.Slot.TWO_MD): his Defense
+                            # counts Attributes.TWO_MD_POSITIONING more in his positioning (PlayAI.pos_def)
 var duty := 0               # defender: his one job this frame in the formation (DefenseFormation.Duty)
 var fspot := Vector2.INF    # ...and the spot it gives him (INF: he marks `mark` the normal way)
 var press := 0              # a piston's pressure on the man with the ball (DefenseFormation.Press)
@@ -77,7 +81,7 @@ func step(dt: float) -> void:
 	var dist := to.length()
 	var desired := Vector2.ZERO
 	if dist > 0.03:
-		desired = to / dist * minf(top_speed * boost * pace, dist * 3.0)
+		desired = to / dist * minf(top_speed * boost * pace * surge, dist * 3.0)
 	vel = vel.move_toward(desired, accel * boost * dt)
 	pos += vel * dt
 	var spd := vel.length()

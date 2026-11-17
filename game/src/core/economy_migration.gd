@@ -10,7 +10,7 @@ extends RefCounted
 ##   1. a Level 4 replay still owned from the 3D replay's withdrawal: its own refund, first
 ##   2. Blue Coin balance x RATE into the shared Yellow Coins, the old balance retired
 ##   3. every store transaction already credited stays known, so nothing's delivered twice
-##   4. Instant Replay: any paid level becomes the one unlock
+##   4. (Instant Replay: retired since, VisualUpgrades.RETIRED; nothing to do)
 ##   5. Broadcast Level 4 owners: down to Level 3, the removed level refunded
 ##   6. cosmetic packs: each one owned refunded, the entitlement retired, the theme back to classic
 ##   7. PRO owned already: no coins (they're for new purchases), and flagged so none are ever paid
@@ -25,7 +25,7 @@ const PACK_BLUE := {"team_hype": 50, "showboat": 50, "chaos": 50, "keeper": 50, 
 ## `s`: {v, bank, old (the Blue Coin vault), looks, pro, pro_coins}. Updates them in place; v says
 ## it's done. A run on an account already at VERSION changes nothing. Returns what it did.
 static func run(s: Dictionary) -> Dictionary:
-	var out := {"ran": false, "blue": 0, "coins": 0, "broadcast": 0, "packs": 0, "replay": false}
+	var out := {"ran": false, "blue": 0, "coins": 0, "broadcast": 0, "packs": 0}
 	if int(s.v) >= VERSION:
 		return out
 	var bank: CoinVault = s.bank
@@ -33,7 +33,7 @@ static func run(s: Dictionary) -> Dictionary:
 	var looks: VisualUpgrades = s.looks
 	out.ran = true
 	# 1. the 3D replay's Level 4, if it never got its refund (it came back as blue)
-	if int(looks.unlocked.get("replay", 1)) > 3:
+	if looks.old_replay > 3:
 		var back := _paid(looks, "replay:4", 0)
 		if back > 0:
 			old.balance += back
@@ -48,11 +48,6 @@ static func run(s: Dictionary) -> Dictionary:
 	for t in old.credited:
 		if not bank.seen(String(t)):
 			bank.credited.append(String(t))
-	# 4. Instant Replay: one unlock (a replay switched off stays off)
-	if int(looks.unlocked.get("replay", 1)) >= 2:
-		out.replay = true
-		looks.unlocked["replay"] = 2
-		looks.equipped["replay"] = mini(int(looks.equipped.get("replay", 2)), 2)
 	# 5. Broadcast Level 4
 	if int(looks.unlocked.get("broadcast", 1)) >= 4:
 		var paid := _paid(looks, "broadcast:4", BROADCAST_L4_BLUE)

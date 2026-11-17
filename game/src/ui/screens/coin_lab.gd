@@ -58,7 +58,7 @@ func _btn(text: String, cb: Callable, n: String) -> Button:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 func cur() -> Career:
 	return dyn[active]
@@ -94,7 +94,7 @@ func test_yellow_purchase() -> Dictionary:
 	var y_before := Wallet.yellow(c, legacy)
 	var why := ""
 	if not Wallet.can_afford_yellow(c, 40, legacy):
-		why = "NOT ENOUGH YELLOW COINS"
+		why = "NOT ENOUGH POLO POINTS"
 	elif not bool(Wallet.spend_yellow(c, 40, "TEST RECRUIT", legacy).ok):
 		why = "REFUSED"
 	else:
@@ -144,7 +144,7 @@ func run_required() -> bool:
 	reset_sandbox()
 	Wallet.grant_yellow(dyn[0], 10, "TEST GRANT")
 	var r := test_yellow_purchase()
-	var ok: bool = not r.signed and r.why == "NOT ENOUGH YELLOW COINS" and dyn[0].credits == 10
+	var ok: bool = not r.signed and r.why == "NOT ENOUGH POLO POINTS" and dyn[0].credits == 10
 	_log("REQUIRED: %s, NOT SIGNED  %s" % [r.why, "PASS" if ok else "FAIL"], UI.GOOD if ok else UI.BAD)
 	return ok
 
@@ -153,7 +153,7 @@ func test_migrate() -> bool:
 	var old := CoinVault.new()
 	old.balance = 100
 	var lk := VisualUpgrades.new()
-	lk.unlocked = {"broadcast": 4, "replay": 3}
+	lk.unlocked = {"broadcast": 4}
 	lk.packs = ["chaos"]
 	lk.bought = [{"txn": "a", "what": "broadcast:4", "n": 100}, {"txn": "b", "what": "chaos", "n": 50}]
 	var bank := CoinVault.new()
@@ -161,14 +161,14 @@ func test_migrate() -> bool:
 	var once := EconomyMigration.run(s)
 	var after := bank.balance
 	EconomyMigration.run(s)
-	var ok: bool = after == 100 * 5 + 100 * 5 + 50 * 5 and bank.balance == after and old.balance == 0 and lk.level("broadcast") == 3 and lk.level("replay") == 2 and lk.packs.is_empty()
+	var ok: bool = after == 100 * 5 + 100 * 5 + 50 * 5 and bank.balance == after and old.balance == 0 and lk.level("broadcast") == 3 and lk.packs.is_empty()
 	_log("MIGRATE: %d BLUE > %d COINS, TWICE = ONCE  %s" % [int(once.blue), after, "PASS" if ok else "FAIL"], UI.GOOD if ok else UI.BAD)
 	return ok
 
-## Buys Goal Celebrations' next tier in the sandbox (built or not: it's only a test).
+## Buys Crowd Atmosphere's next tier in the sandbox (built or not: it's only a test).
 func test_upgrade() -> String:
-	var why := looks.buy_tier("goal", cur(), legacy, false)
-	_log("BUY GOAL TIER: %s" % ("LEVEL %d" % looks.level("goal") if why == "" else why), UI.GOLD if why == "" else UI.WARN)
+	var why := looks.buy_tier("crowd", cur(), legacy, false)
+	_log("BUY CROWD TIER: %s" % ("LEVEL %d" % looks.level("crowd") if why == "" else why), UI.GOLD if why == "" else UI.WARN)
 	return why
 
 # ------------------------------------------------------------------ the readout
@@ -189,7 +189,7 @@ func rows() -> Array:
 	var lt: Dictionary = Wallet.last
 	var last := "-" if lt.is_empty() else ("%s %d %s %s" % [String(lt.k).to_upper(), int(lt.n), String(lt.get("cur", "")).to_upper(), String(lt.get("what", ""))])
 	return [["ACTIVE", "%s  %s" % [_name(active), c.uid]],
-		["YELLOW COINS", str(Wallet.yellow(c, legacy))],
+		["POLO POINTS", str(Wallet.yellow(c, legacy))],
 		["...DYNASTY", str(Wallet.dynasty_yellow(c))],
 		["...SHARED", "%d (TEST VAULT)" % legacy.balance],
 		["OWNED", "%d TIERS" % looks.bought.size()],

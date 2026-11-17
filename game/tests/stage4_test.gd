@@ -1,6 +1,6 @@
 extends RefCounted
 ## Broadcast Presentation, Victory Celebrations and Pregame Presentation (the Premium Visual
-## Upgrades update, Stage 4), and the free trophy ceremony.
+## Upgrades update, Stage 4). The win presentation is gone: a win goes straight to the full-time panel.
 ##   godot --headless --path game -- --test stage4
 ## Screenshots (needs a window): --test stage4_png <dir>
 
@@ -45,31 +45,10 @@ func _broadcast() -> void:
 	r.check(BroadcastFx.new(4).level == 3, "no Level 4 any more")
 
 func _victory() -> void:
-	var t := League.make_team(2, 1)
-	for lv in [1, 2, 3, 4]:
-		r.check(VictoryShow.new(t, lv, "nat").trophy() != null and bool(VictoryShow.new(t, lv, "nat").parts().trophy), "Level %d: the NCSA trophy ceremony (free at Level 1)" % lv)
-		r.check(bool(VictoryShow.new(t, lv, "conf").parts().trophy), "Level %d: the conference trophy" % lv)
-	r.check(not bool(VictoryShow.new(t, 3).parts().trophy) and not bool(VictoryShow.new(t, 4).parts().title), "no title, no real trophy")
-	r.check(VictoryShow.new(t, 1).headline() == "VICTORY!" and VictoryShow.new(t, 1, "", true).headline() == "BIG WIN!"
-		and VictoryShow.new(t, 1, "conf").headline() == "CONFERENCE CHAMPIONS!" and VictoryShow.new(t, 1, "nat").headline() == "NATIONAL CHAMPIONS!", "the moment follows the game")
-	var a := VictoryShow.new(t, 3).parts()
-	var b := VictoryShow.new(t, 4).parts()
-	r.check(int(VictoryShow.new(t, 1).parts().confetti) == 0 and int(a.confetti) == 0 and int(b.confetti) > 0, "confetti at Level 4")
-	r.check(int(VictoryShow.new(t, 1).parts().fireworks) == 0 and int(VictoryShow.new(t, 2).parts().fireworks) > 0 and int(a.fireworks) > 0 and int(b.fireworks) > 0, "fireworks from Level 2")
-	r.check(int(VictoryShow.new(t, 4, "nat").parts().fireworks) > int(VictoryShow.new(t, 4, "conf").parts().fireworks) and int(VictoryShow.new(t, 4, "conf").parts().fireworks) > int(b.fireworks), "the NCSA title gets the most")
-	r.check(VictoryShow.new(t, 4, "nat").length() == VictoryShow.new(t, 4, "nat").celebration(), "Level 4 is its own ceremony: nothing after it")
-	r.check(VictoryShow.new(t, 3).length() < 7.0 and VictoryShow.new(t, 4).length() < 7.0, "short")
-	var c := VictoryShow.new(t, 1, "nat")
-	r.check(not c.ceremony(), "the celebration first")
-	while not c.done:
-		c.step(1.0 / 30.0)
-		if c.t > c.celebration() + 0.1 and c.t < c.celebration() + 0.2:
-			r.check(c.ceremony(), "then the ceremony")
-	r.check(c.length() < 7.0, "short (%.1f s)" % c.length())
-	var s := VictoryShow.new(t, 4)
-	s.skip()
-	s.skip()
-	r.check(s.done and s.skipped, "skip")
+	var old := VisualUpgrades.from_dict({"unlocked": {"victory": 4, "crowd": 3}, "equipped": {"victory": 3, "crowd": 2}})
+	r.check(not old.unlocked.has("victory") and not old.equipped.has("victory") and old.level("crowd") == 2 and old.worn("crowd") == 2,
+		"an old save's Victory levels are dropped, everything else kept")
+	r.check(VisualUpgrades.cat("victory").is_empty() and not VisualUpgrades.BUILT.has("victory"), "Victory Presentation isn't sold")
 
 func _pregame() -> void:
 	var a := League.make_team(2, 1)
@@ -77,33 +56,31 @@ func _pregame() -> void:
 	var one := PregameIntro.new(a, b, true)
 	one.calm = false
 	one.set_level(1)
-	r.check(one.lineup.is_empty() and is_equal_approx(one.length(), PregameIntro.TOTAL), "Level 1: the entrance as it was")
+	r.check(is_zero_approx(one.lead()) and is_equal_approx(one.length(), PregameIntro.TOTAL), "Level 1: the plain glass doors, the same timeline")
+	r.check(not bool(one._look().logos) and not bool(one._look().sign) and is_zero_approx(float(one._look().spill)), "Level 1: no logos, no sign, no light spilling in")
 	var two := PregameIntro.new(a, b, true)
 	two.calm = false
 	two.set_level(2)
-	r.check(two.lineup.is_empty() and is_equal_approx(two.length(), PregameIntro.TOTAL), "Level 2: no longer, just richer")
+	r.check(is_zero_approx(two.lead()) and is_equal_approx(two.length(), PregameIntro.TOTAL), "Level 2: the old Level 1's entrance, as long")
+	r.check(two._look() == PregameIntro.LOOK_GAMEDAY and bool(two._look().logos) and two._look().wall == PregameIntro.WALL, "Level 2: the old Level 1's hall and logo doors, exactly")
 	var three := PregameIntro.new(a, b, true)
 	three.calm = false
 	three.set_level(3)
-	r.check(three.lineup.size() == 7 and three.lineup[0][1] == a, "Level 3: your starting seven")
-	var seven := a.starters()
-	r.check(three.lineup.all(func(e): return seven.has(e[0])), "real starters, none invented")
+	r.check(is_equal_approx(three.lead(), PregameIntro.HALL_TIME) and is_equal_approx(three.length(), PregameIntro.HALL_TIME + PregameIntro.TOTAL), "Level 3: the corridor first, then the doors")
+	three.t = 0.5
+	r.check(three.stage() == "HALLWAY" and three.dolly() < 1.0 and is_zero_approx(three.open_amount()), "Level 3: walking the dark corridor, the doors still shut")
+	r.check(three._look().glass == two._look().glass and bool(three._look().logos), "Level 3: Level 2's own doors at its end")
+	three.t = three.lead() + PregameIntro.DOLLY_END
+	r.check(three.bloom() > 0.0 and three.through(), "Level 3: the bright pool's flash coming through")
 	var four := PregameIntro.new(a, b, true)
 	four.calm = false
 	four.set_level(4)
-	r.check(four.lineup.is_empty() and four.sevens.size() == 2 and four.length() < 10.0, "Level 4: both sevens, no one-by-one cards, still under 10 s (%.1f)" % four.length())
-	four.t = PregameIntro.LINEUP_AT + 0.05
-	r.check(four.in_showcase() and four.seven_index() == 0 and four.stage() == "HOME SEVEN", "the graphics start in the reveal")
-	var k0 := four.reveal()
-	four.t = PregameIntro.LINEUP_AT + four.extra() - 0.05
-	r.check(is_equal_approx(four.reveal(), k0) and four.seven_index() == 1, "the camera holds while they're up")
+	r.check(four.level == 3 and is_equal_approx(four.length(), PregameIntro.HALL_TIME + PregameIntro.TOTAL), "the old Level 4 (Starting 7, removed) plays Level 3's entrance")
 	four.t = four.length() - 0.5
-	r.check(not four.in_showcase() and four.matchup() > 0.0, "then the matchup")
-	four.calm = true
-	r.check(four.length() < 7.0, "Reduce Motion keeps it short")
+	r.check(four.matchup() > 0.0 and four.stage() == "MATCHUP", "Level 3 ends on the matchup")
 
 func _cfg(extra: Dictionary) -> Dictionary:
-	var d := {"us": League.make_team(2, 1), "them": League.make_team(3, 1), "seed": 77, "minutes": 2.0, "autoplay": true, "intro": false, "replay": false}
+	var d := {"us": League.make_team(2, 1), "them": League.make_team(3, 1), "seed": 77, "minutes": 2.0, "autoplay": true, "intro": false}
 	d.merge(extra, true)
 	return d
 
@@ -126,15 +103,14 @@ func _in_a_match() -> void:
 		await _frames(2)
 		var plain = Game.current_screen
 		_finish(plain)
-		r.check(plain.victory == null, "no presentation unless the match has it")
 		if plain.flow.state.winner() == 0:
 			want = plain.flow.state.score.duplicate()
 			seed_won = sd
 			break
 	r.check(seed_won >= 0, "found a seed your side wins")
-	Store.looks.unlocked = {"broadcast": 3, "victory": 4, "pregame": 4}
-	Store.looks.equipped = {"broadcast": 3, "victory": 4, "pregame": 4}
-	Game.match_cfg = _cfg({"victory": true, "title": "nat", "seed": seed_won})
+	Store.looks.unlocked = {"broadcast": 3, "pregame": 3}
+	Store.looks.equipped = {"broadcast": 3, "pregame": 3}
+	Game.match_cfg = _cfg({"victory": true, "title": "nat", "seed": seed_won})   # (old keys: ignored now)
 	Game.goto("match", Game.match_cfg)
 	await _frames(2)
 	var ms = Game.current_screen
@@ -155,27 +131,22 @@ func _in_a_match() -> void:
 	r.check(said, "goals bring the broadcast graphic")
 	r.check(ms.flow.phase == MatchFlow.Phase.FINAL, "the match reaches the final whistle")
 	r.check(ms.flow.state.score == want, "a full presentation ends exactly the same: %s" % str(ms.flow.state.score))
-	r.check(ms.victory != null and ms.victory.title == "nat" and ms.flow.state.winner() == 0, "a win: the presentation, before the panel")
-	ms._process(0.5)
-	var ev := InputEventMouseButton.new()
-	ev.button_index = MOUSE_BUTTON_LEFT
-	ev.pressed = true
-	ms._input(ev)
-	ms._input(ev)
-	r.check(ms.victory == null and ms.victories_done == 1 and ms.results != null, "a tap skips to the full-time panel, once")
-	# a loss has none
-	var lost := MatchState.new()
-	lost.score = [1, 3]
-	r.check(lost.winner() != 0, "(a loss)")
-	var src := FileAccess.get_file_as_string("res://src/match/match_screen.gd")
-	r.check(src.contains("if won and victory_on:"), "the victory show is only for a win")
+	r.check(ms.flow.state.winner() == 0 and ms.results != null and not "victory" in ms, "a win: straight to the full-time panel, no presentation")
+	r.check(not ResourceLoader.exists("res://src/match/victory_show.gd"), "the victory presentation is gone")
 	Store.reset_for_tests()
-	Store.bank.credit(4375, "T-S4")
+	var total := 0
+	for c in VisualUpgrades.CATS:
+		total += VisualUpgrades.category_cost(String(c.id))
+	Store.bank.credit(total, "T-S4")
 	var all := true
 	for c in VisualUpgrades.CATS:
+		if String(c.id) == "goal":
+			for n in range(VisualUpgrades.CONFETTI, VisualUpgrades.FIREWORKS + 1):
+				all = all and Store.buy_celeb(n) == ""   # (Goal Celebrations: each on its own)
+			continue
 		for i in VisualUpgrades.top(String(c.id)) - 1:
 			all = all and Store.buy_tier(String(c.id)) == ""
-	r.check(all and Store.vault == 0, "all six categories can be bought in full: 4,375 Yellow Coins")
+	r.check(total == 1725 and all and Store.vault == 0, "every category can be bought in full: %d Polo Points (no Instant Replay or Starting 7)" % total)
 	Store.reset_for_tests()
 	Game.goto("title")
 	await _frames(1)
@@ -185,25 +156,22 @@ func _lab() -> void:
 	Game.goto("visual_lab")
 	await _frames(3)
 	var lab = Game.current_screen
-	lab.cat_i = 4
+	lab.cat_i = VisualUpgrades.CATS.map(func(cd): return String(cd.id)).find("pregame")
 	lab._labels()
-	lab.lv = 2
+	lab.lv = 3
 	lab.game_i = 3
-	r.check(lab.preview() and lab.cine is VictoryShow and lab.cine.title == "nat", "VICTORY preview, the NCSA title")
+	r.check(lab.preview() and lab.cine is PregameIntro and lab.cine.level == 3, "PREGAME preview at Level 3, the top")
 	lab.test_skip()
 	r.check(lab.cine == null, "skip")
-	lab.cat_i = 5
-	lab._labels()
-	lab.lv = 4
-	r.check(lab.preview() and lab.cine is PregameIntro and lab.cine.sevens.size() == 2, "PREGAME preview at Level 4")
-	r.check(lab.compare() and lab.queue == [2, 3, 4], "COMPARE LEVELS")
+	lab.preview()
+	r.check(lab.compare() and lab.queue == [2, 3], "COMPARE LEVELS: Pregame's three")
 	lab.reset_preview()
-	lab.cat_i = 3
+	lab.cat_i = VisualUpgrades.CATS.map(func(cd): return String(cd.id)).find("broadcast")
 	lab._labels()
 	lab.lv = 3
 	r.check(lab.preview() and lab.goal_run, "BROADCAST preview: a real goal")
 	r.check(Store.looks.level("broadcast") == 1, "...and owns nothing")
-	r.check(Store.looks.level("broadcast") == 1 and Store.looks.level("victory") == 1, "previews own nothing")
+	r.check(Store.looks.level("broadcast") == 1 and Store.looks.level("pregame") == 1, "previews own nothing")
 	Game.settings.dev_mode = false
 	Game.goto("title")
 	await _frames(1)

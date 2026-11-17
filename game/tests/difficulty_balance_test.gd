@@ -17,23 +17,24 @@ func run(runner) -> void:
 	_keeper()
 	_arms()
 	_play_scope()
+	_catch_shoot()
 	_preservation()
 
 # ------------------------------------------------------------------ the table
 func _table() -> void:
 	var near := func(a: float, b: float) -> bool: return absf(a - b) < 0.0001
-	r.check(near.call(Difficulty.cpu_shot_speed(0.0, 0.2), 0.85) and near.call(Difficulty.cpu_shot_speed(0.0, 1.0), 0.90), "17: EASY: 0.85x a soft shot, 0.90x a full one")
-	r.check(near.call(Difficulty.cpu_shot_speed(0.5, 0.2), 1.0) and near.call(Difficulty.cpu_shot_speed(0.5, 1.0), 1.0), "17: MEDIUM: exactly 1x")
-	r.check(near.call(Difficulty.cpu_shot_speed(1.0, 0.2), 1.10) and near.call(Difficulty.cpu_shot_speed(1.0, 1.0), 1.25), "17: HARD: 1.10x a soft shot, 1.25x a full one")
+	r.check(near.call(Difficulty.cpu_shot_speed(0.0, 0.2), 1.0) and near.call(Difficulty.cpu_shot_speed(0.0, 1.0), 1.0), "17: EASY: exactly 1x (the game as first tuned)")
+	r.check(near.call(Difficulty.cpu_shot_speed(0.5, 0.2), 1.12) and near.call(Difficulty.cpu_shot_speed(0.5, 1.0), 1.28), "17: MEDIUM: 1.12x a soft shot, 1.28x a full one")
+	r.check(near.call(Difficulty.cpu_shot_speed(1.0, 0.2), 1.2) and near.call(Difficulty.cpu_shot_speed(1.0, 1.0), 1.4), "17: HARD: 1.2x a soft shot, 1.4x a full one")
 	var smooth := true
 	for i in 9:
 		smooth = smooth and Difficulty.cpu_shot_speed(1.0, 0.2 + i * 0.1) >= Difficulty.cpu_shot_speed(1.0, 0.2 + maxf(0.0, i - 1) * 0.1)
-	r.check(smooth and near.call(Difficulty.cpu_shot_speed(1.0, 0.6), 1.175), "17: smooth from a soft pull to a full one (power 0.6 on HARD: 1.175x)")
-	r.check(near.call(Difficulty.cpu_keeper_react(0.0), 1.30) and near.call(Difficulty.cpu_keeper_react(0.5), 1.0) and near.call(Difficulty.cpu_keeper_react(1.0), 0.75), "18: keeper reaction delay 1.30x / 1x / 0.75x")
-	r.check(near.call(Difficulty.cpu_arm_delay(0.0), 1.35) and near.call(Difficulty.cpu_arm_delay(0.5), 1.0) and near.call(Difficulty.cpu_arm_delay(1.0), 0.75), "19: arm-raise delay 1.35x / 1x / 0.75x")
+	r.check(smooth and near.call(Difficulty.cpu_shot_speed(1.0, 0.6), 1.30), "17: smooth from a soft pull to a full one (power 0.6 on HARD: 1.30x)")
+	r.check(near.call(Difficulty.cpu_keeper_react(0.0), 1.0) and near.call(Difficulty.cpu_keeper_react(0.5), 0.65) and near.call(Difficulty.cpu_keeper_react(1.0), 0.5), "18: keeper reaction delay 1x / 0.65x / 0.5x")
+	r.check(near.call(Difficulty.cpu_arm_delay(0.0), 1.0) and near.call(Difficulty.cpu_arm_delay(0.5), 0.65) and near.call(Difficulty.cpu_arm_delay(1.0), 0.5), "19: arm-raise delay 1x / 0.65x / 0.5x")
 	var d := 0.8   # (a DYNAMIC level between MEDIUM and HARD)
-	r.check(Difficulty.cpu_shot_speed(d, 1.0) > 1.0 and Difficulty.cpu_shot_speed(d, 1.0) < 1.25 and Difficulty.cpu_keeper_react(d) < 1.0 and Difficulty.cpu_keeper_react(d) > 0.75
-		and Difficulty.cpu_arm_delay(d) < 1.0 and Difficulty.cpu_arm_delay(d) > 0.75, "20: a DYNAMIC level in between gets in-between values, on the same lines")
+	r.check(Difficulty.cpu_shot_speed(d, 1.0) > 1.28 and Difficulty.cpu_shot_speed(d, 1.0) < 1.4 and Difficulty.cpu_keeper_react(d) < 0.65 and Difficulty.cpu_keeper_react(d) > 0.5
+		and Difficulty.cpu_arm_delay(d) < 0.65 and Difficulty.cpu_arm_delay(d) > 0.5, "20: a DYNAMIC level in between gets in-between values, on the same lines")
 
 # ------------------------------------------------------------------ 17
 func _resolve(k: PoloPlayer, from: Vector2, power: float, seed_v: int, extra: Dictionary, aim_y := 9.4, shooter_sho := 5.0) -> Dictionary:
@@ -59,8 +60,8 @@ func _shot_speed() -> void:
 		var easy := _resolve(k, from, power, 500 + i, {"speed_k": Difficulty.cpu_shot_speed(0.0, power)})
 		same = same and float(hard.cross_y) == float(base.cross_y) and float(easy.cross_y) == float(base.cross_y)
 		ratio_ok = ratio_ok and absf(float(hard.speed) / float(base.speed) - Difficulty.cpu_shot_speed(1.0, power)) < 0.0001 \
-			and float(easy.speed) < float(base.speed) and (hard.outcome != base.outcome or float(hard.flight) < float(base.flight))
-	r.check(ratio_ok, "17: the speed is the shot's own, then the difficulty's multiplier: EASY slower, HARD faster, the flight with it")
+			and float(easy.speed) == float(base.speed) and (hard.outcome != base.outcome or float(hard.flight) < float(base.flight))
+	r.check(ratio_ok, "17: the speed is the shot's own, then the difficulty's multiplier: EASY as first tuned, HARD faster, the flight with it")
 	r.check(same, "17: accuracy untouched: the same shot crosses exactly where it would have")
 	var soft := _resolve(k, FROM[0], 0.3, 7, {"speed_k": Difficulty.cpu_shot_speed(1.0, 0.3)})
 	var soft0 := _resolve(k, FROM[0], 0.3, 7, {})
@@ -111,9 +112,9 @@ func _arms() -> void:
 	var good := AttrBench.player({"dfn": 9.0})
 	var poor := AttrBench.player({"dfn": 3.0})
 	var base := DefenseFormation.arm_delay(good)
-	r.check(absf(DefenseFormation.arm_delay(good, Difficulty.cpu_arm_delay(1.0)) - base * 0.75) < 0.0001 and absf(DefenseFormation.arm_delay(good, Difficulty.cpu_arm_delay(0.0)) - base * 1.35) < 0.0001,
-		"19: the arm starts up 0.75x as late on HARD, 1.35x on EASY")
-	r.check(DefenseFormation.arm_delay(good, 1.0) == DefenseFormation.arm_delay(good), "19: MEDIUM exactly as before")
+	r.check(absf(DefenseFormation.arm_delay(good, Difficulty.cpu_arm_delay(1.0)) - base * 0.5) < 0.0001 and absf(DefenseFormation.arm_delay(good, Difficulty.cpu_arm_delay(0.0)) - base) < 0.0001,
+		"19: the arm starts up 0.5x as late on HARD, as first tuned on EASY")
+	r.check(DefenseFormation.arm_delay(good, Difficulty.cpu_arm_delay(0.0)) == DefenseFormation.arm_delay(good), "19: EASY exactly as first tuned")
 	r.check(DefenseFormation.arm_delay(good, 0.75) < DefenseFormation.arm_delay(poor, 0.75), "19: Defense still matters at every level")
 	# an arm on its way up isn't a block till it's up: the rise itself (ARM_RAISE) is never shortened
 	var s := Swimmer.new(good, Swimmer.Side.THEM)
@@ -138,17 +139,17 @@ func _play_scope() -> void:
 	att.set_level(1.0)
 	att.cpu_level = 1.0
 	r.check(att.cpu_speed_k(1.0) == 1.0, "21: your own shots: never faster or slower, at any difficulty")
-	r.check(absf(att.gk_k() - 0.75) < 0.0001 and absf(att.arm_k() - 0.75) < 0.0001, "18/19: you attacking on HARD: their keeper and arms quicker")
+	r.check(absf(att.gk_k() - 0.5) < 0.0001 and absf(att.arm_k() - 0.5) < 0.0001, "18/19: you attacking on HARD: their keeper and arms quicker")
 	var dfn := Play.new(them, us, Play.Kind.HALF_COURT, rng)
 	dfn.defending = true
 	dfn.set_level(Difficulty.TEAMMATES)
 	dfn.cpu_level = 1.0
-	r.check(absf(dfn.cpu_speed_k(1.0) - 1.25) < 0.0001 and absf(dfn.cpu_speed_k(0.2) - 1.10) < 0.0001, "17: you defending on HARD: their shots 1.10x .. 1.25x")
+	r.check(absf(dfn.cpu_speed_k(1.0) - 1.4) < 0.0001 and absf(dfn.cpu_speed_k(0.2) - 1.2) < 0.0001, "17: you defending on HARD: their shots 1.2x .. 1.4x")
 	r.check(dfn.gk_k() == 1.0 and dfn.arm_k() == 1.0, "21: your keeper and your defenders: untouched at any difficulty")
 	var easy := Play.new(them, us, Play.Kind.HALF_COURT, rng)
 	easy.defending = true
 	easy.cpu_level = 0.0
-	r.check(easy.cpu_speed_k(1.0) < 1.0, "17: EASY: their shots slower")
+	r.check(easy.cpu_speed_k(1.0) == 1.0, "17: EASY: their shots as first tuned")
 	# the flow sets the CPU's level on every possession, from the one fixed at the start (DYNAMIC included)
 	var f := MatchFlow.new(League.make_team(1, 0), League.make_team(4, 0), 77, MatchState.QUARTER_MIN, 0.85)
 	var lv_ok := true
@@ -184,3 +185,18 @@ func _preservation() -> void:
 	r.check(not sim_src.contains("Difficulty") and not sim_src.contains("cpu_shot_speed"), "14: simulated games never read the difficulty")
 	var dv := Difficulty.params(1.0)
 	r.check(not dv.has("shot_low") and not dv.has("gk_react"), "the decision table is unchanged (the CPU's timing and pace kept apart)")
+
+# ------------------------------------------------------------------ catch and shoot
+func _catch_shoot() -> void:
+	var near := func(a: float, b: float) -> bool: return absf(a - b) < 0.0001
+	r.check(near.call(Difficulty.catch_shoot_k(0.0), 0.9) and near.call(Difficulty.catch_shoot_k(0.5), 0.75) and near.call(Difficulty.catch_shoot_k(1.0), 0.5),
+		"catch and shoot: the window 10% / 25% / 50% smaller on EASY / MEDIUM / HARD")
+	var w := ShotModel.CATCH_SHOOT_WINDOW
+	r.check(ShotModel.catch_shoot(w * 0.5, 0.5) == 1.0 and ShotModel.catch_shoot(w * 0.5 + 0.01, 0.5) < 1.0 and ShotModel.catch_shoot(w * 1.0, 0.5) == 0.0 and ShotModel.catch_shoot(w, 1.0) == 1.0,
+		"catch and shoot: HARD's full bonus and fade are half as long; unscaled as before")
+	var f := MatchFlow.new(League.make_team(1, 0), League.make_team(4, 0), 78, MatchState.QUARTER_MIN, 1.0)
+	f._start_attack(Play.Kind.HALF_COURT)
+	var att_k := f.play.cs_k
+	f._start_defense(Play.Kind.HALF_COURT)
+	var def_k := f.play.cs_k
+	r.check(near.call(att_k, 0.5) and def_k == 1.0, "catch and shoot: only your attack against the CPU (HARD %.2f); their shots keep the full window (%.2f)" % [att_k, def_k])

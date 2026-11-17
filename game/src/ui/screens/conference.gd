@@ -6,6 +6,13 @@ const TABS := ["STANDINGS", "PLAYOFFS", "TOP 20"]
 var tab := "STANDINGS"
 var conf := ""
 
+## {"tab": "PLAYOFFS", "fam": "nat"}: straight to a bracket (the SEASON OVER hub's VIEW BRACKET).
+func setup(params: Dictionary) -> void:
+	if String(params.get("tab", "")) in TABS:
+		tab = String(params.tab)
+	if String(params.get("fam", "")) in ["conf", "nat"]:
+		pfam = String(params.fam)
+
 func _ready() -> void:
 	back_target = "hub"
 	build("CONFERENCE", true, true)
@@ -69,12 +76,10 @@ func _standings(v: VBoxContainer) -> void:
 	col.add_child(board)
 	var bv := UI.vbox(3)
 	board.add_child(bv)
-	# the five conferences, the same size, yours picked first; the expansion's on a row of their own
+	# the five conferences, the same size, yours picked first
 	var picks := UI.hbox(4)
 	picks.name = "ConfButtons"
 	bv.add_child(picks)
-	var more := UI.hbox(4)
-	more.name = "ConfButtonsExpansion"
 	for cid in ids:
 		var cc: String = cid
 		var on := cc == conf
@@ -83,9 +88,7 @@ func _standings(v: VBoxContainer) -> void:
 			_render(), "tab_on" if on else "tab", 0, 18)
 		b.name = "Conf_" + cc
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		(picks if Colleges.division(cc) == Colleges.D1 else more).add_child(b)
-	if more.get_child_count() > 0:
-		bv.add_child(more)
+		picks.add_child(b)
 	var conf_title := c.conf_name(conf).to_upper()
 	var title := UI.label(conf_title, 20 if conf_title.length() <= 36 else 16, UI.GOLD, "big")
 	title.name = "ConfTitle"
@@ -190,7 +193,7 @@ func _num(text: String, w: int, colr: Color) -> Label:
 func _badges(_i: int, id: String, _played: bool) -> Array:
 	if id in c.season.get("conf_champs", []):
 		return [_badge("CHAMPION", UI.GOLD)]
-	if id in c.season.get("nat_seeds", []) or id in c.season.get("d3_seeds", []):
+	if id in c.season.get("nat_seeds", []):
 		return [_badge("QUALIFIED", UI.GOOD)]
 	return []
 
@@ -217,24 +220,10 @@ func _qualification(n_conf: int) -> Control:
 		v.add_child(lab)
 	return p
 
-## The rules for the conference on show: Division I's and II's road to the NCSA, or Division III's own.
+## The rules for the conference on show: the road to the NCSA.
 func _qualification_lines(n_conf: int) -> Array:
-	var d1 := Colleges.conf_ids_of(c.teams).filter(func(cid): return Colleges.division(cid) == Colleges.D1).size()
-	var d2 := 1 if c.divisions.has(Colleges.D2) else 0
-	match Colleges.division(conf):
-		Colleges.D2:
-			return ["All seven WWPA teams play the conference tournament, seeded by conference record (the top seed gets a bye).",
-				"Its champion is the Division II champion and takes the one Division II place in the %d-team NCSA Championship, seeded by the final poll." % Schedule.NCSA_FIELD]
-		Colleges.D3:
-			var out: Array = ["The SCIAC takes its top eight and the MPSF East all seven to their tournaments; the NWPC has none.",
-				"The SCIAC and MPSF East champions and the two highest-ranked other Division III teams play the four-team NCSA Division III Championship."]
-			return out
-	if d2 == 0 and n_conf == d1:
-		return ["Every team plays its conference tournament, seeded by conference record (the top seeds get byes).",
-			"The %d tournament champions and the %d highest-ranked other teams in the final National Top 20 poll make the %d-team NCSA Championship." % [d1, Schedule.NCSA_FIELD - d1, Schedule.NCSA_FIELD],
-			"The field is seeded by that poll; seeds 1-4 skip the first round."]
 	return ["Every team plays its conference tournament, seeded by conference record (the top seeds get byes).",
-		"The %d Division I champions%s and the %d highest-ranked other Division I teams in the final poll make the %d-team NCSA Championship." % [d1, ", the WWPA champion" if d2 == 1 else "", Schedule.NCSA_FIELD - d1 - d2, Schedule.NCSA_FIELD],
+		"The %d tournament champions and the %d highest-ranked other teams in the final National Top 20 poll make the %d-team NCSA Championship." % [n_conf, Schedule.NCSA_FIELD - n_conf, Schedule.NCSA_FIELD],
 		"The field is seeded by that poll; seeds 1-4 skip the first round."]
 
 ## The PLAYOFFS tab: a real bracket (PlayoffBracket), rounds left to right to the champions. Any
@@ -259,9 +248,7 @@ func _playoffs(v: VBoxContainer) -> void:
 		_ncsa_view(v, m)
 		return
 	var title := c.conf_name(pconf).to_upper() if pfam == "conf" else ("NCSA CHAMPIONSHIP - BRACKET PREVIEW" if m.get("preview", false) else "NCSA CHAMPIONSHIP")
-	if pfam == "d3":
-		title = "NCSA DIVISION III CHAMPIONSHIP"
-	elif pfam == "conf" and title.length() > 34:
+	if pfam == "conf" and title.length() > 34:
 		title = Colleges.conf_abbr(pconf) + " CHAMPIONSHIP"
 	var tl := UI.label(title, 16, UI.ACCENT, "big")
 	tl.name = "BracketTitle"
@@ -285,25 +272,15 @@ func _playoffs(v: VBoxContainer) -> void:
 	v.add_child(UI.spacer(0, 2))
 	if m.empty:
 		var msg := "The playoffs start after the regular season. Every team plays its conference tournament; then %d teams play for the NCSA Championship." % Schedule.NCSA_FIELD
-		if pfam == "d3":
-			msg = "The NCSA Division III Championship is set after the conference finals: the SCIAC and MPSF East champions and the two highest-ranked other Division III teams."
-		elif pfam == "nat":
+		if pfam == "nat":
 			msg = "The NCSA Championship field is set after the conference finals: the %d conference champions and the best-ranked teams in the final Top 20 poll, %d in all." % [Colleges.conf_ids_of(c.teams).size(), Schedule.NCSA_FIELD]
 		v.add_child(para(msg, UI.DIM, 400))
 		return
 	v.add_child(PlayoffBracket.view(c, m, c.school))
-	var third := Schedule.d3_game(c.schedule, "d3_third")
-	if pfam == "d3" and not third.is_empty() and third.r != null:
-		var tl3 := UI.label("THIRD PLACE: %s  %s" % [Colleges.team_name(Schedule.winner(third)).to_upper(), Schedule.score_text(third, third.h == Schedule.winner(third))], 8, UI.DIM, "caps")
-		tl3.name = "ThirdPlace"
-		v.add_child(tl3)
 
-## The tournaments to choose between: Division III's only in a dynasty that plays it.
+## The tournaments to choose between.
 func _families() -> Array:
-	var out: Array = [["conf", "CONFERENCE"], ["nat", "NCSA"]]
-	if c.divisions.has(Colleges.D3):
-		out.append(["d3", "DIV III"])
-	return out
+	return [["conf", "CONFERENCE"], ["nat", "NCSA"]]
 
 ## The NCSA's bracket, filling the page (no scrolling): no header rows over it; its title, where
 ## it stands and the CONFERENCE / NCSA buttons in the open space over the final and the champion
@@ -342,8 +319,6 @@ func _step_conf(confs: Array, d: int) -> void:
 ## Where the tournament stands, in a line under its name.
 func _stage(m: Dictionary) -> String:
 	var what := "CONFERENCE CHAMPIONSHIP BRACKET" if pfam == "conf" else "NATIONAL CHAMPIONSHIP BRACKET"
-	if pfam == "d3":
-		what = "DIVISION III CHAMPIONSHIP BRACKET"
 	if m.empty:
 		return what
 	if m.projected:

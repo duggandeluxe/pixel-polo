@@ -25,6 +25,8 @@ const JET_GOOD := 82
 ## The trait this player's attributes earn, or "". A quick-match club's player (PoloPlayer.pro)
 ## by his 0-100 ratings, as before 2.0.
 static func best_for(p: PoloPlayer) -> String:
+	if p.dev_recruit != "":
+		return ""   # (a DEV Recruit is his attributes and nothing more: DevRecruits)
 	if p.pro:
 		return _pro_best_for(p)
 	if p.attrs.is_empty():

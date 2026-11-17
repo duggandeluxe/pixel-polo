@@ -185,11 +185,10 @@ func _screens() -> void:
 	var sz: Vector2 = card.size
 	r.check(sz.y >= 80.0, "21: the cards keep their size (%s)" % str(sz))
 	Recruiting.toggle_pin(c, c.market[0])
-	scr.tab = "PINNED"
 	scr._render()
 	await _frames(2)
-	r.check(scr.find_children("Card_*", "", true, false).size() == 1, "the PINNED tab: the pinned prospect")
-	scr.tab = "MARKET"
+	r.check(scr.find_child("Tab_PINNED", true, false) == null and scr.find_children("Card_*", "", true, false).filter(func(x): return bool(x.get_meta("pinned"))).size() == 1,
+		"no PINNED tab: the pinned prospect is marked on the MARKET")
 	# the hub: the early warning once, the final one at NEXT SEASON
 	c.phase = "done"
 	c.recruit_warned = ""
@@ -264,8 +263,6 @@ static func shots(runner, out: String) -> void:
 		print("  shot ", name)
 	Game.goto("recruiting", {"tab": "MARKET"})
 	await snap.call("n1_market")
-	Game.goto("recruiting", {"tab": "PINNED"})
-	await snap.call("n3_pinned")
 	c.phase = "done"
 	c.recruit_warned = ""
 	Game.goto("hub")

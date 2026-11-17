@@ -11,8 +11,8 @@ static func run(runner, dir: String) -> void:
 	c.add_credits(125, "WIN")
 	Game.career = c
 	Store.bank.credit(900, "T-SHOT")
-	Store.looks.buy_tier("goal", c, null, false)
-	Store.looks.buy_tier("goal", c, null, false)
+	Store.looks.buy_celeb(VisualUpgrades.CONFETTI if Store.looks.celebs.is_empty() else VisualUpgrades.FIREWORKS, c)
+	Store.looks.buy_celeb(VisualUpgrades.CONFETTI if Store.looks.celebs.is_empty() else VisualUpgrades.FIREWORKS, c)
 	Game.goto("more")
 	await _snap(runner, dir, "HUB")
 	Game.goto("store")
@@ -21,16 +21,39 @@ static func run(runner, dir: String) -> void:
 	for i in 3:
 		await runner.get_tree().process_frame
 	await _snap(runner, dir, "GALLERY")
+	# GOAL CELEBRATIONS: the four cards (CONFETTI and FIREWORKS owned above, FIREWORKS equipped)
+	Game.goto("upgrade_detail", {"cat": "goal"})
+	for i in 3:
+		await runner.get_tree().process_frame
+	await _snap(runner, dir, "CELEBRATIONS")
+	Game.current_screen.select(3)
+	for i in 3:
+		await runner.get_tree().process_frame
+	await _snap(runner, dir, "CELEBRATIONS_WATER")
 	Game.goto("store")
 	var sc: ScrollContainer = Game.current_screen.body.get_child(Game.current_screen.body.get_child_count() - 1)
 	await _snap(runner, dir, "STORE_TOP")
+	# a pack hovered (its edge lit), then held down (into its shadow), mid-shimmer
+	var leg: Control = Game.current_screen.find_child("Pack_blue_1400", true, false)
+	_move(runner, leg.get_global_rect().get_center())
+	Game.current_screen.anim_t = 0.25
+	await _snap(runner, dir, "STORE_HOVER")
+	var gd: Control = Game.current_screen.find_child("Pack_blue_350", true, false)
+	_move(runner, gd.get_global_rect().get_center())
+	await runner.get_tree().process_frame
+	_click(runner, gd.get_global_rect().get_center(), true)
+	await _snap(runner, dir, "STORE_PRESSED")
+	_move(runner, Vector2(240, 262))   # let go off the card: no purchase
+	await runner.get_tree().process_frame
+	_click(runner, Vector2(240, 262), false)
+	sc = Game.current_screen.body.get_child(Game.current_screen.body.get_child_count() - 1)
 	sc.scroll_vertical = 100000
 	await _snap(runner, dir, "STORE_END")
 	Game.goto("recruiting")
 	await _snap(runner, dir, "RECRUITING")
 	Game.goto("program")
 	await _snap(runner, dir, "PROGRAM")
-	for id in ["goal", "replay", "crowd", "broadcast", "victory", "pregame"]:
+	for id in ["goal", "crowd", "broadcast", "pregame"]:
 		Game.goto("upgrade_detail", {"cat": id})
 		for i in 4:
 			await runner.get_tree().process_frame
@@ -41,21 +64,27 @@ static func run(runner, dir: String) -> void:
 			d._process(1.0 / 30.0)
 			if i == 45 or i == 149:
 				await _snap(runner, dir, "D_%s_%d" % [id, i])
-	# the victory scenes, full screen
-	var blue: PoloTeam = c.teams["CULA"]
-	for row in [[1, 1.0, ""], [2, 1.3, ""], [3, 0.6, ""], [3, 2.0, ""], [3, 3.6, ""], [4, 1.5, ""], [4, 3.4, ""], [4, 3.4, "nat"], [3, 5.6, "conf"]]:
-		var show := VictoryShow.new(blue, row[0], row[2], false, false)
-		show.score = [12, 9]
-		var cv := UI.canvas(0, 0, func(ci: Control): show.draw(ci, ci.size))
-		cv.set_anchors_preset(Control.PRESET_FULL_RECT)
-		Game.overlay.add_child(cv)
-		while show.t < float(row[1]):
-			show.step(1.0 / 30.0)
-		cv.queue_redraw()
-		await _snap(runner, dir, "V%d_%.1f%s" % [row[0], row[1], row[2]])
-		cv.queue_free()
 	Store.reset_for_tests()
 	Game.career = null
+
+## The mouse to `at` (the 480 x 270 canvas; events come in window pixels).
+static func _move(runner, at: Vector2) -> void:
+	var e := InputEventMouseMotion.new()
+	e.position = _win(runner, at)
+	e.global_position = e.position
+	Input.parse_input_event(e)
+
+static func _click(runner, at: Vector2, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = down
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+	e.position = _win(runner, at)
+	e.global_position = e.position
+	Input.parse_input_event(e)
+
+static func _win(runner, at: Vector2) -> Vector2:
+	return runner.get_viewport().get_final_transform() * at
 
 static func _snap(runner, dir: String, name: String) -> void:
 	for i in 3:

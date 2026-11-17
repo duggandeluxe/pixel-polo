@@ -19,23 +19,36 @@ static func cap_chip(ci: CanvasItem, pos: Vector2, cap: Color, trim: Color) -> v
 	ci.draw_rect(Rect2(pos.x + 2, pos.y + 3, 3, 2), trim)
 	ci.draw_rect(Rect2(pos.x, pos.y, 7, 6), Color(0, 0, 0, 0.25), false, 1.0)
 
-## Top-centre scoreboard: CAP STATEN ISLAND 3  Q2 3:12  2 BRONX CAP, each team by its short name
-## (Colleges.short_name). Both names get the same room, so the clock stays in the middle. Returns
-## the board.
+## Top-centre scoreboard, in the tier worn (Scoreboard.tier, or `tier` if given: the Scoreboard
+## upgrade's four looks). Returns the board (every pixel it covers).
 ## `fx` (GoalShow.board_fx): a goal going up on the board, {side, add, t (seconds since), col
 ## (the scorer's cap), big}: that side's number (the shootout's, in a shootout) shows `add`
-## more than the state, drops in, swells and settles, over a flash of the team's colour.
+## more than the state and goes up in the tier's own way.
 static func scoreboard(ci: CanvasItem, w: float, st: MatchState, us: PoloTeam, them: PoloTeam,
-		us_cap: Color, them_cap: Color, them_trim: Color = Color.TRANSPARENT, fx: Dictionary = {}) -> Rect2:
-	var a := fit_name(us, NAME_MAX)
-	var b := fit_name(them, NAME_MAX)
+		us_cap: Color, them_cap: Color, them_trim: Color = Color.TRANSPARENT, fx: Dictionary = {}, tier: int = -1) -> Rect2:
+	return Scoreboard.draw(ci, Scoreboard.tier() if tier < 1 else tier, w, st, us, them, us_cap, them_cap, them_trim, fx)
+
+## Level 1, CLASSIC: LOGO CULA 3  Q2 3:12  2 BRO LOGO, each team by its list-mark logo
+## (TeamLogo, the 20 x 12 box, 1:1 on the pixel grid) and its abbreviation (Scoreboard.abbr).
+## Both get the same room, so the clock stays in the middle; the number that goes up drops in,
+## swells and settles, over a flash of the team's colour. The caps passed in are unused (no
+## tier shows a cap chip any more).
+const C_LOGO := Vector2(20, 12)    # Classic's logo box (TeamLogo.SMALL)
+const C_PAD := 3.0                 # board edge to logo, and logo to the name slot
+static func classic_board(ci: CanvasItem, w: float, st: MatchState, us: PoloTeam, them: PoloTeam,
+		_us_cap: Color, _them_cap: Color, _them_trim: Color = Color.TRANSPARENT, fx: Dictionary = {}) -> Rect2:
+	var a := Scoreboard.abbr_label(us)
+	var b := Scoreboard.abbr_label(them)
 	var slot := maxf(NAME_MIN, maxf(float(a.w), float(b.w)))
-	var bw := 126.0 + 2.0 * slot
+	var o := 2.0 * C_PAD + C_LOGO.x - 14.0     # how much further right everything sits than with the old 7 px cap
+	var bw := 126.0 + 2.0 * o + 2.0 * slot
 	var x := roundf((w - bw) / 2.0)
 	var r := Rect2(x, 2, bw, 21)
 	ci.draw_rect(r, PANEL_BG)
 	ci.draw_rect(r, UI.BORDER, false, 1.0)
-	cap_chip(ci, Vector2(x + 5, 9), us_cap, us.c1)
+	var ly := roundf(r.get_center().y - C_LOGO.y / 2.0)
+	TeamLogo.draw_in(ci, Rect2(x + C_PAD, ly, C_LOGO.x, C_LOGO.y), us)
+	x += o
 	draw_name(ci, a, Vector2(x + 14, 15), HORIZONTAL_ALIGNMENT_CENTER, slot)
 	var score := [int(st.score[0]), int(st.score[1])]
 	var pens := [int(st.shootout[0]), int(st.shootout[1])]
@@ -57,7 +70,7 @@ static func scoreboard(ci: CanvasItem, w: float, st: MatchState, us: PoloTeam, t
 			UI.text(ci, Vector2(cx, 20), str(score[i]), 20, UI.GOLD, "big", HORIZONTAL_ALIGNMENT_CENTER, 22)
 	UI.text(ci, Vector2(x + 37 + slot, 15), mid, 8, mid_col, "caps", HORIZONTAL_ALIGNMENT_CENTER, 52)
 	draw_name(ci, b, Vector2(x + 112 + slot, 15), HORIZONTAL_ALIGNMENT_CENTER, slot)
-	cap_chip(ci, Vector2(x + 114 + 2.0 * slot, 9), them_cap, them.c2 if them_trim.a == 0.0 else them_trim)
+	TeamLogo.draw_in(ci, Rect2(r.end.x - C_PAD - C_LOGO.x, ly, C_LOGO.x, C_LOGO.y), them)
 	return r
 
 const SCORE_FLASH := 0.3       # s the scoring side's number flashes its team colour
@@ -123,10 +136,17 @@ static func shot_clock(ci: CanvasItem, pos: Vector2, secs: float) -> void:
 	var r := Rect2(pos, Vector2(30, 21))
 	ci.draw_rect(r, PANEL_BG)
 	ci.draw_rect(r, UI.BORDER, false, 1.0)
+	sc_digits(ci, r, secs, "SC", pos + Vector2(3, 8), pos + Vector2(11, 19))
+
+## The shot clock's seconds in box `r` (any tier's): above the final five, `label` (if any) at
+## `label_at` and the two LED digits at `digits_at` (their baseline); in them, the heartbeat
+## digit centred on `r`.
+static func sc_digits(ci: CanvasItem, r: Rect2, secs: float, label: String, label_at: Vector2, digits_at: Vector2) -> void:
 	var s := maxi(0, int(ceilf(secs)))
 	if s > SC_FINAL:
-		UI.text(ci, pos + Vector2(3, 8), "SC", 8, UI.TEXT, "body")
-		UI.text(ci, pos + Vector2(11, 19), "%02d" % s, SC_FS, LED, "big")
+		if label != "":
+			UI.text(ci, label_at, label, 8, UI.TEXT, "body")
+		UI.text(ci, digits_at, "%02d" % s, SC_FS, LED, "big")
 		return
 	var u := clampf((float(s) - secs) / SC_SHRINK, 0.0, 1.0) if s > 0 else 1.0
 	var fs := int(roundf(SC_FS * lerpf(SC_PULSE, 1.0, 1.0 - pow(1.0 - u, 3.0))))
@@ -140,21 +160,54 @@ static func shot_clock(ci: CanvasItem, pos: Vector2, secs: float) -> void:
 	UI.text(ci, at, d, fs, SC_RED, "big")
 
 ## The power play's countdown. `down`: it's your team that's a man short.
-static func man_up(ci: CanvasItem, w: float, secs: float, down: bool = false) -> void:
-	var t := "%s   %d" % ["5 ON 6" if down else "6 ON 5", int(ceilf(secs))]
-	var tw := UI.text_width(t, 8, "caps") + 10
-	var r := Rect2(roundf((w - tw) / 2.0), 25, tw, 11)
-	ci.draw_rect(r, Color(UI.GOLD, 0.92))
-	UI.text(ci, r.position + Vector2(5, 8), t, 8, Color("1a1206"), "caps")
+## `y`: its top (Scoreboard.below the board).
+## A two-part pill in the scoreboard's family: the call on a solid accent tab (gold for your 6 on
+## 5, red when you're the one short), the seconds in that accent on navy, and a one-pixel bar
+## along the bottom draining with the time. The last few seconds blink.
+const MU_INK := Color("1a1206")
+const MU_RED := Color("ff4545")
+const MU_SHADE := Color("040a1f")
+const MU_H := 12.0
+static func man_up(ci: CanvasItem, w: float, secs: float, down: bool = false, y: float = 25.0) -> void:
+	var label := "5 ON 6" if down else "6 ON 5"
+	var accent: Color = MU_RED if down else UI.GOLD
+	var lw := UI.text_width(label, 8, "caps") + 10.0
+	var nw := UI.text_width("20", 8, "caps") + 10.0   # fixed: the pill doesn't jitter as it counts
+	var tw := lw + nw
+	var r := Rect2(roundf((w - tw) / 2.0), y, tw, MU_H)
+	# dark rim, navy body, the accent tab on the left with a lit top edge
+	ci.draw_rect(r.grow(1.0), MU_SHADE)
+	ci.draw_rect(r, PANEL_BG)
+	var tab := Rect2(r.position, Vector2(lw, MU_H))
+	ci.draw_rect(tab, accent)
+	ci.draw_rect(Rect2(tab.position + Vector2(1, 1), Vector2(lw - 2, 1)), accent.lightened(0.45))
+	ci.draw_rect(Rect2(tab.end.x - 1, r.position.y, 1, MU_H), accent.darkened(0.45))
+	ci.draw_rect(r, accent, false, 1.0)
+	UI.text(ci, tab.position + Vector2(0, 9), label, 8, MU_INK if not down else UI.TEXT, "caps",
+		HORIZONTAL_ALIGNMENT_CENTER, lw)
+	# the seconds: blink white over the last five
+	var s := maxi(0, int(ceilf(secs)))
+	var num_col := accent
+	if s <= 5 and int(secs * 4.0) % 2 == 0:
+		num_col = UI.TEXT
+	UI.text(ci, Vector2(tab.end.x, r.position.y + 9), str(s), 8, num_col, "caps", HORIZONTAL_ALIGNMENT_CENTER, nw)
+	# the time left: the seconds' half's bottom edge drains from right to left
+	var frac := clampf(secs / Play.MAN_UP_TIME, 0.0, 1.0)
+	var bar := Rect2(tab.end.x, r.end.y - 2, nw - 1, 2)
+	ci.draw_rect(bar, MU_SHADE)
+	ci.draw_rect(Rect2(bar.position, Vector2(roundf(bar.size.x * frac), 2)), accent)
 
 ## Under the shot clock on your attack: the formation their defence is in (DefenseFormation),
-## right-aligned to `right_top`.
+## right-aligned to `right_top`. The shot clock's own box style (navy, the board's border), the
+## name in the board's text colour.
 static func formation_tag(ci: CanvasItem, right_top: Vector2, text: String) -> void:
-	var tw := UI.text_width(text, 8, "caps") + 8
-	var r := Rect2(roundf(right_top.x - tw), right_top.y, tw, 11)
-	ci.draw_rect(r, Color(CARD, 0.85))
-	ci.draw_rect(r, LINE, false, 1.0)
-	UI.text(ci, r.position + Vector2(0, 8), text, 8, DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, tw)
+	var tw := UI.text_width(text, 8, "caps") + 10.0
+	var r := Rect2(roundf(right_top.x - tw), right_top.y, tw, 12)
+	ci.draw_rect(r.grow(1.0), MU_SHADE)
+	ci.draw_rect(r, PANEL_BG)
+	ci.draw_rect(r, UI.BORDER, false, 1.0)
+	ci.draw_rect(Rect2(r.position + Vector2(1, r.size.y - 2), Vector2(r.size.x - 2, 1)), Color(LINE, 0.8))
+	UI.text(ci, r.position + Vector2(0, 9), text, 8, UI.TEXT, "caps", HORIZONTAL_ALIGNMENT_CENTER, tw)
 
 static func pause_button(ci: CanvasItem, r: Rect2) -> void:
 	ci.draw_rect(r, UI.PANEL)
@@ -221,37 +274,33 @@ static func card(ci: CanvasItem, size: Vector2, title: String, title_col: Color,
 		UI.text(ci, r.position + Vector2(0, h - 6), footer, 8, DIM, "body", HORIZONTAL_ALIGNMENT_CENTER, w)
 	return r
 
-## Bottom-left: who has the ball. #1 FARRELL  GK, his stars, his personal fouls ("1 EX": this
-## game's, MatchState.pf; -1 hides it), his trait. The stars are his roster card's
-## (Deck.star_bar: gold CURRENT, his HOT stars red), no number and no POTENTIAL.
-static func holder_tag(ci: CanvasItem, pos: Vector2, p: PoloPlayer, ex: int = -1) -> void:
-	var tg := tag_parts(p, ex)
+## Bottom-left: who has the ball, either side's (the screen passes Play.holder's player).
+## #1 FARRELL, his stars, GK (no trait). The stars are his roster card's (Deck.star_bar: gold
+## CURRENT, his HOT stars red), no number and no POTENTIAL. (No personal-foul count: that lives
+## in the box score and the roll-out notices, MatchState.pf.) A DEV recruit's (DevRecruits.is_dev,
+## never his name) stars are DEV_STAR light blue instead of gold, here only; his HOT red stays red.
+const DEV_STAR := Color("66d9ff")
+static func holder_tag(ci: CanvasItem, pos: Vector2, p: PoloPlayer) -> void:
+	var tg := tag_parts(p)
 	ci.draw_rect(Rect2(pos, tg.size), Color(0.02, 0.04, 0.1, 0.75))
 	UI.text(ci, pos + Vector2(4, 9), tg.text, 8, UI.TEXT, "caps")
-	Deck.star_bar(ci, pos.x + tg.stars_x, pos.y + 2, tg.stars, tg.stars, tg.red)
-	if tg.ex != "":
-		UI.text(ci, pos + Vector2(tg.ex_x, 9), tg.ex, 8, ex_color(ex), "caps")
-	if tg.trait != "":
-		UI.text(ci, pos + Vector2(tg.trait_x, 9), tg.trait, 8, UI.GOLD, "caps")
+	Deck.star_bar(ci, pos.x + tg.stars_x, pos.y + 2, tg.stars, tg.stars, tg.red, Color(1, 1, 1, 0.14), Deck.STAR_SHAPE,
+		DEV_STAR if DevRecruits.is_dev(p) else PlayerForm.GOLD)
+	UI.text(ci, pos + Vector2(tg.pos_x, 9), tg.pos, 8, UI.TEXT, "caps")
 
-## A personal-foul count's colour: 0-1 plain, 2 (FOUL TROUBLE) yellow, 3 (ROLLED) red.
-const EX_WARN := Color("ffd83d")
-const EX_OUT := Color("ff4545")
-static func ex_color(n: int) -> Color:
-	return EX_OUT if n >= MatchState.ROLL_AT else (EX_WARN if n == MatchState.ROLL_AT - 1 else Color("e6ecff"))
+const EX_OUT := Color("ff4545")   # (the roll-out notice's red)
 
-## What the tag shows and where (px from its left): {text, stars (CURRENT, in halves), red (his
-## form's red stars, PlayerForm.red_stars), ex ("2 EX", or ""), trait, stars_x, ex_x, trait_x, size}.
-static func tag_parts(p: PoloPlayer, ex: int = -1) -> Dictionary:
-	var t := "%s  %s" % [p.tag(), p.pos_text()]
+## What the tag shows and where (px from its left): #4 MOSLEY, his stars, ATK. {text (number and
+## name), stars (CURRENT, in halves), red (his form's red stars, PlayerForm.red_stars), pos,
+## stars_x, pos_x, size}. (No trait: the tag doesn't show it.)
+static func tag_parts(p: PoloPlayer) -> Dictionary:
+	var t := p.tag()
 	var tw := UI.text_width(t, 8, "caps")
-	var tr := Traits.title(p.trait_id)
-	var trw := UI.text_width(tr, 8, "caps") + 6 if tr != "" else 0.0
+	var ps := p.pos_text()
+	var pw := UI.text_width(ps, 8, "caps")
 	var sw := Deck.star_bar_w_for(p.stars, p.stars, PlayerForm.red_stars(p.form_state()))
-	var ex_t := "%d EX" % ex if ex >= 0 else ""
-	var exw := UI.text_width(ex_t, 8, "caps") + 6 if ex_t != "" else 0.0
-	return {"text": t, "stars": PlayerForm.snap_half(p.stars), "red": PlayerForm.red_stars(p.form_state()), "trait": tr, "ex": ex_t,
-		"stars_x": tw + 10.0, "ex_x": tw + sw + 16.0, "trait_x": tw + sw + 16.0 + exw, "size": Vector2(tw + sw + 16.0 + exw + trw, 12.0)}
+	return {"text": t, "stars": PlayerForm.snap_half(p.stars), "red": PlayerForm.red_stars(p.form_state()), "pos": ps,
+		"stars_x": tw + 10.0, "pos_x": tw + sw + 16.0, "size": Vector2(tw + sw + 16.0 + pw + 4.0, 12.0)}
 
 ## The roll-out notice, for ROLL_NOTE_TIME under the callouts: PLAYER ROLLED! (yours: who, 3
 ## PERSONAL FOULS, OUT FOR THE REST OF THE GAME, his replacement) or OPPONENT ROLLED! (shorter).
@@ -284,47 +333,151 @@ static func dive_note(ci: CanvasItem, size: Vector2, text: String, age: float, y
 	UI.text(ci, Vector2(0, y + 9), text, 8, Color(UI.GOLD, a), "caps", HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 ## A small centred label under the scoreboard (the venue).
-static func pill(ci: CanvasItem, size: Vector2, text: String, col: Color) -> void:
+static func pill(ci: CanvasItem, size: Vector2, text: String, col: Color, y: float = 30.0) -> void:
 	var tw := UI.text_width(text, 8, "caps") + 12
-	var r := Rect2(roundf((size.x - tw) / 2.0), 30, tw, 12)
+	var r := Rect2(roundf((size.x - tw) / 2.0), y, tw, 12)
 	ci.draw_rect(r, Color(0.02, 0.04, 0.1, 0.8))
 	ci.draw_rect(r, col, false, 1.0)
 	UI.text(ci, r.position + Vector2(0, 9), text, 8, col, "caps", HORIZONTAL_ALIGNMENT_CENTER, tw)
 
-## The quarter-break card, after the 1st, 2nd and 3rd quarters (full time goes straight to the
-## results): END OF 2ND QUARTER, the score big, the team codes beside it, and `footer`.
+## The quarter-break scoreboard, after the 1st, 2nd and 3rd quarters (full time goes straight
+## to the results): a broadcast-style board over the darkened pool. A header band (END OF 1ST
+## QUARTER / END OF 3RD QUARTER on blue; HALFTIME on gold, with gold rivets in the corners), then
+## the two teams side by side, names in white over their scores in yellow in LED wells, a VS
+## chip on the divider between them, and `footer` in the strip along the bottom. A layered pixel
+## frame: ink, gold, ink, a bevelled navy face, a hard drop shadow; the corners notched, never
+## rounded. `age`: seconds since the break began: it drops in from a few px up and the header
+## wipes open (BREAK_IN s), and the prompt's arrow blinks. Taps are never held up by it (the
+## screen takes them as before). Returns the board's rect (HalftimePanel's button and the
+## broadcast comparison sit off it).
 const ORDINALS := ["1ST", "2ND", "3RD", "4TH"]
+const BREAK_IN := 0.18               # s the board takes to drop in
+const BREAK_PAD := 12.0              # px between the frame and a team's column
+const BREAK_INK := Color("050c26")
+const BREAK_FACE := Color("12204a")
+const BREAK_HI := Color("26397a")    # the bevel's light edge
+const BREAK_LO := Color("0a1433")    # ...and its dark one
+const BREAK_BAND := Color("1d3f94")  # a quarter's header band
+const BREAK_WELL := Color("070f2c")  # the score wells
+
+## The header: HALFTIME after the 2nd, END OF 1ST QUARTER / END OF 3RD QUARTER otherwise.
+static func break_title(quarter: int) -> String:
+	if quarter == 2:
+		return "HALFTIME"
+	return "END OF %s QUARTER" % ORDINALS[clampi(quarter - 1, 0, 3)]
 
 static func break_card(ci: CanvasItem, size: Vector2, quarter: int, score: Array, us: PoloTeam,
-		them: PoloTeam, footer: String = "TAP TO CONTINUE") -> Rect2:
-	ci.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.04, 0.1, 0.55))
-	var title := "END OF %s QUARTER" % ORDINALS[clampi(quarter - 1, 0, 3)]
-	# the score row, centred as a whole: BRONX  1 - 1  ERIE; long names in the small caps
-	var us_n := Colleges.short_name(us).to_upper()
-	var them_n := Colleges.short_name(them).to_upper()
-	var gaps := [12.0, 8.0, 8.0, 12.0]
-	var row := 0.0
-	var parts: Array = []
-	for name_size in [16, 8]:
-		parts = [[us_n, name_size, "caps", UI.TEXT], [str(score[0]), 40, "big", UI.GOLD], ["-", 40, "big", UI.GOLD],
-			[str(score[1]), 40, "big", UI.GOLD], [them_n, name_size, "caps", UI.TEXT]]
-		row = 0.0
-		for i in parts.size():
-			row += UI.text_width(String(parts[i][0]), int(parts[i][1]), String(parts[i][2])) + (gaps[i] if i < gaps.size() else 0.0)
-		if row + 24.0 <= size.x - 32.0:
-			break
-	var w := maxf(maxf(196.0, UI.text_width(title, 16, "big") + 36.0), row + 24.0)
-	var h := 92.0
-	var r := Rect2(roundf((size.x - w) / 2.0), roundf((size.y - h) / 2.0), w, h)
-	ci.draw_rect(r, CARD)
-	ci.draw_rect(r, UI.GOLD, false, 1.0)
-	UI.text(ci, r.position + Vector2(0, 21), title, 16, UI.TEXT, "big", HORIZONTAL_ALIGNMENT_CENTER, w)
-	var x := roundf(r.position.x + (w - row) / 2.0)
-	var base := r.position.y + 62.0
-	for i in parts.size():
-		var pt: Array = parts[i]
-		var y := base if int(pt[1]) == 40 else base - 6.0
-		UI.text(ci, Vector2(x, y), String(pt[0]), int(pt[1]), pt[3], String(pt[2]))
-		x += UI.text_width(String(pt[0]), int(pt[1]), String(pt[2])) + (gaps[i] if i < gaps.size() else 0.0)
-	UI.text(ci, r.position + Vector2(0, h - 9), footer, 8, DIM, "body", HORIZONTAL_ALIGNMENT_CENTER, w)
+		them: PoloTeam, footer: String = "TAP TO CONTINUE", age: float = 99.0) -> Rect2:
+	var motion := not Game.test_mode and not bool(Game.settings.get("reduce_motion", false))
+	if not motion:
+		age = 99.0
+	var e := 1.0 - pow(1.0 - clampf(age / BREAK_IN, 0.0, 1.0), 3.0)
+	ci.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.04, 0.1, 0.6 * clampf(age / 0.12, 0.0, 1.0)))
+	var half := quarter == 2
+	var title := break_title(quarter)
+	# the names: the short names, in the big caps if both fit their column, else the small ones
+	var names := [Colleges.short_name(us).to_upper(), Colleges.short_name(them).to_upper()]
+	var nsz := 16
+	var nw := maxf(UI.text_width(names[0], 16, "caps"), UI.text_width(names[1], 16, "caps"))
+	var w := roundf(minf(maxf(maxf(272.0, UI.text_width(title, 16, "big") + 72.0), 2.0 * nw + 47.0 + 2.0 * BREAK_PAD), size.x - 24.0))
+	var col_w := floorf((w - 47.0 - 2.0 * BREAK_PAD) / 2.0)   # each team's column, either side of the divider
+	if nw > col_w:
+		nsz = 8
+		for i in 2:
+			names[i] = _fit_text(names[i], 8, "caps", col_w)
+	var h := 106.0
+	var r := Rect2(roundf((size.x - w) / 2.0), roundf((size.y - h) / 2.0) - roundf(10.0 * (1.0 - e)), w, h)
+	# the frame: shadow, ink, gold, ink, then the face with its bevel
+	_notched(ci, Rect2(r.position + Vector2(3, 3), r.size), Color(0, 0, 0, 0.45))
+	_notched(ci, r, BREAK_INK)
+	_notched(ci, r.grow(-1), UI.GOLD)
+	ci.draw_rect(r.grow(-2), BREAK_INK)
+	var face := r.grow(-3)
+	ci.draw_rect(face, BREAK_FACE)
+	ci.draw_rect(Rect2(face.position, Vector2(face.size.x, 1)), BREAK_HI)
+	ci.draw_rect(Rect2(face.position, Vector2(1, face.size.y)), BREAK_HI)
+	ci.draw_rect(Rect2(face.position.x, face.end.y - 1, face.size.x, 1), BREAK_LO)
+	ci.draw_rect(Rect2(face.end.x - 1, face.position.y, 1, face.size.y), BREAK_LO)
+	# the header band, wiping open from the middle
+	var band_h := 22.0 if half else 20.0
+	var band := Rect2(face.position.x + 3, face.position.y + 3, face.size.x - 6, band_h)
+	var open := clampf((age - 0.04) / 0.14, 0.0, 1.0)
+	var bw := roundf(band.size.x * lerpf(0.2, 1.0, 1.0 - pow(1.0 - open, 2.0)))
+	var shown := Rect2(roundf(band.position.x + (band.size.x - bw) / 2.0), band.position.y, bw, band_h)
+	ci.draw_rect(shown, UI.GOLD if half else BREAK_BAND)
+	ci.draw_rect(Rect2(shown.position, Vector2(shown.size.x, 1)), Color(1, 1, 1, 0.35 if half else 0.18))
+	ci.draw_rect(Rect2(shown.position.x, shown.end.y, shown.size.x, 1), BREAK_INK)
+	ci.draw_rect(Rect2(shown.position.x, shown.end.y + 1, shown.size.x, 1), BREAK_HI if half else UI.GOLD)
+	if open >= 0.6:
+		var cy := band.position.y + roundf(band_h / 2.0)
+		var ty := cy + 6.0
+		if not half:
+			UI.text(ci, Vector2(band.position.x, ty + 1), title, 16, Color(BREAK_INK, 0.8), "big", HORIZONTAL_ALIGNMENT_CENTER, band.size.x)
+		UI.text(ci, Vector2(band.position.x, ty), title, 16, UI.INK if half else UI.TEXT, "big", HORIZONTAL_ALIGNMENT_CENTER, band.size.x)
+		# pixel diamonds either side of the title (three a side at halftime)
+		var tw := UI.text_width(title, 16, "big")
+		var cx := band.position.x + band.size.x / 2.0
+		for n in (3 if half else 1):
+			for sgn: float in [-1.0, 1.0]:
+				_diamond(ci, Vector2(roundf(cx + sgn * (tw / 2.0 + 10.0 + 9.0 * n)), cy), UI.INK if half else UI.GOLD)
+	if half:   # halftime: gold rivets in the face's corners
+		for p: Vector2 in [face.position + Vector2(2, 2), Vector2(face.end.x - 4, face.position.y + 2),
+				Vector2(face.position.x + 2, face.end.y - 4), face.end - Vector2(4, 4)]:
+			ci.draw_rect(Rect2(p, Vector2(2, 2)), UI.GOLD)
+	# the teams: a column each, the name over its score in a well
+	var top := band.end.y + 6.0
+	var mid := roundf(face.position.x + face.size.x / 2.0)
+	for i in 2:
+		var x0 := mid - 23.0 - col_w if i == 0 else mid + 24.0
+		UI.text_shadow(ci, Vector2(x0, top + (14.0 if nsz == 16 else 11.0)), String(names[i]), nsz, UI.TEXT, "caps",
+			HORIZONTAL_ALIGNMENT_CENTER, col_w, Color(BREAK_INK, 0.9))
+		var sc := str(int(score[i]))
+		var ww := maxf(52.0, UI.text_width(sc, 40, "big") + 20.0)
+		var well := Rect2(roundf(x0 + (col_w - ww) / 2.0), top + 20.0, ww, 34.0)
+		ci.draw_rect(well, BREAK_WELL)
+		ci.draw_rect(Rect2(well.position, Vector2(well.size.x, 1)), BREAK_LO)
+		ci.draw_rect(Rect2(well.position.x, well.end.y - 1, well.size.x, 1), BREAK_HI)
+		ci.draw_rect(well, Color(UI.GOLD, 0.35), false, 1.0)
+		UI.text(ci, Vector2(well.position.x, well.end.y - 5.0), sc, 40, Color(BREAK_INK, 0.9), "big", HORIZONTAL_ALIGNMENT_CENTER, well.size.x)
+		UI.text(ci, Vector2(well.position.x, well.end.y - 7.0), sc, 40, UI.GOLD, "big", HORIZONTAL_ALIGNMENT_CENTER, well.size.x)
+	# the divider down the middle, broken by the VS chip
+	for y in range(int(top), int(top + 54.0), 2):
+		ci.draw_rect(Rect2(mid, y, 1, 1), BREAK_HI)
+	var vs := Rect2(mid - 9.0, top + 30.0, 19.0, 13.0)
+	ci.draw_rect(vs, BREAK_FACE)
+	ci.draw_rect(vs, Color(UI.GOLD, 0.6), false, 1.0)
+	UI.text(ci, Vector2(vs.position.x, vs.position.y + 10.0), "VS", 8, DIM, "caps", HORIZONTAL_ALIGNMENT_CENTER, vs.size.x)
+	# the prompt strip along the bottom: the footer, and for a tap a blinking pixel arrow after it
+	var strip := Rect2(face.position.x + 3, face.end.y - 18.0, face.size.x - 6, 15.0)
+	ci.draw_rect(strip, Color(BREAK_INK, 0.7))
+	ci.draw_rect(Rect2(strip.position, Vector2(strip.size.x, 1)), BREAK_LO)
+	var tap := footer == "TAP TO CONTINUE"
+	var fw := UI.text_width(footer, 8, "caps")
+	var fx := roundf(strip.position.x + (strip.size.x - fw - (10.0 if tap else 0.0)) / 2.0)
+	UI.text(ci, Vector2(fx, strip.position.y + 11.0), footer, 8, UI.DIM, "caps")
+	if tap:
+		var lit := not motion or age < 0.3 or int(age / 0.45) % 2 == 0
+		var acol := Color(UI.GOLD, 1.0 if lit else 0.3)
+		for j in 4:
+			ci.draw_rect(Rect2(fx + fw + 6.0 + j, strip.position.y + 4.0 + j, 1, 7 - 2 * j), acol)
 	return r
+
+## `r` filled with `col`, its four corner pixels left out (a pixel frame's notched corner).
+static func _notched(ci: CanvasItem, r: Rect2, col: Color) -> void:
+	ci.draw_rect(Rect2(r.position.x + 1, r.position.y, r.size.x - 2, r.size.y), col)
+	ci.draw_rect(Rect2(r.position.x, r.position.y + 1, 1, r.size.y - 2), col)
+	ci.draw_rect(Rect2(r.end.x - 1, r.position.y + 1, 1, r.size.y - 2), col)
+
+## A 5 px pixel diamond centred on `c`.
+static func _diamond(ci: CanvasItem, c: Vector2, col: Color) -> void:
+	ci.draw_rect(Rect2(c.x - 2, c.y, 5, 1), col)
+	ci.draw_rect(Rect2(c.x - 1, c.y - 1, 3, 3), col)
+	ci.draw_rect(Rect2(c.x, c.y - 2, 1, 5), col)
+
+## `s` cut down (ending in ".") until it fits `w` px.
+static func _fit_text(s: String, sz: int, font: String, w: float) -> String:
+	if UI.text_width(s, sz, font) <= w:
+		return s
+	while s.length() > 1 and UI.text_width(s + ".", sz, font) > w:
+		s = s.substr(0, s.length() - 1).strip_edges()
+	return s + "."

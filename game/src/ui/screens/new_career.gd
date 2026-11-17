@@ -13,6 +13,7 @@ var preview: Career
 
 func _ready() -> void:
 	preview = Game.dynasty_setup()
+	Difficulty.reset_new_career()   # a new dynasty opens on DYNAMIC
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Game.setup_seed   # (the suggested coach comes with the setup too)
 	var nm := CollegeGen.coach_name(rng)
@@ -39,6 +40,7 @@ func on_back() -> void:
 	Game.goto("careers", {}, false)
 
 func _render() -> void:
+	_build_gen += 1
 	if step != 0 and is_instance_valid(list_scroll):
 		list_at = list_scroll.scroll_vertical
 	for ch in body.get_children():
@@ -74,12 +76,6 @@ var list_at := -1          # the grid's scroll, kept while you name your coach (
 var next_button: Button
 var glory: Progression
 var groups: Array = []     # Progression.picker_groups, read once when the screen opens
-## The division filter over the cards: 0 ALL SCHOOLS, else Colleges.D1..D3.
-static var start_filter := 0   # (what the screen opens on: the Road to Glory's tests look at Division I alone)
-var div_filter := start_filter
-## ACTIVE DIVISIONS for this dynasty: a pack you own starts on; yours is on whatever this says.
-var div_off := {}
-const FILTERS := [[0, "ALL SCHOOLS"], [1, "DIVISION I"], [2, "DIVISION II"], [3, "DIVISION III"]]
 
 func _step_school() -> void:
 	title_label.text = "PICK YOUR SCHOOL"
@@ -108,26 +104,17 @@ func _step_school() -> void:
 	next_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header_right.add_child(next_button)
 	_update_next()
-	if Colleges.lower_divisions:   # (Division I alone: no filter to choose with)
-		var filters := UI.hbox(2)
-		filters.name = "DivisionFilters"
-		filters.alignment = BoxContainer.ALIGNMENT_CENTER
-		for f in FILTERS:
-			var d: int = f[0]
-			var fb := UI.button(String(f[1]), func():
-				div_filter = d
-				list_at = 0
-				_render(), "tab_on" if div_filter == d else "tab", 0, 14)
-			fb.name = "Filter%d" % d
-			filters.add_child(fb)
-		body.add_child(filters)
 	list = UI.vbox(CARD_GAP)
 	list_scroll = UI.scroll(list)
 	list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(list_scroll)
 	cards.clear()
 	var cols := columns()
-	for g in groups.filter(_in_filter):
+	# the cards in view now, the rest a few a frame after (all ~800 controls in one frame held the
+	# screen up); all at once when the grid opens scrolled (back from YOUR COACH) or in the tests
+	var later: Array = []
+	var now_left := cols * FIRST_ROWS if list_at <= 0 and (stagger_in_tests or not Game.test_mode) else 1 << 20
+	for g in groups:
 		list.add_child(_group_header(g))
 		var grid := GridContainer.new()
 		grid.name = "Grid%d" % int(g.tier)
@@ -136,15 +123,39 @@ func _step_school() -> void:
 		grid.add_theme_constant_override("v_separation", CARD_GAP)
 		list.add_child(grid)
 		for id in g.ids:
-			var card := _school_card(Colleges.school(id))
-			cards[id] = card
-			grid.add_child(card)
+			if now_left > 0:
+				now_left -= 1
+				_add_card(grid, id)
+			else:
+				later.append([grid, id])
 	list.add_child(UI.spacer(0, 1))   # (the last row's bottom border clear of the page's edge)
 	_place_list.call_deferred()
+	if not later.is_empty():
+		_build_later(later)
 
-## Is this group's division the one the filter shows?
-func _in_filter(g: Dictionary) -> bool:
-	return div_filter == 0 or int(g.get("div", Colleges.D1)) == div_filter
+static var stagger_in_tests := false   # (the load-time profile: the tests otherwise get every card at once)
+const FIRST_ROWS := 2       # card rows built with the page; the rest follow, CARDS_PER_FRAME at a time
+const CARDS_PER_FRAME := 4
+var _build_gen := 0         # a new _render leaves any older build's cards unmade
+
+func _add_card(grid: GridContainer, id: String) -> void:
+	var card := _school_card(Colleges.school(id))
+	cards[id] = card
+	grid.add_child(card)
+
+func _build_later(todo: Array) -> void:
+	_build_gen += 1
+	var gen := _build_gen
+	while not todo.is_empty():
+		await get_tree().process_frame
+		if gen != _build_gen or not is_inside_tree() or step != 0:
+			return
+		for _i in CARDS_PER_FRAME:
+			if todo.is_empty():
+				break
+			var it: Array = todo.pop_front()
+			if is_instance_valid(it[0]):
+				_add_card(it[0], it[1])
 
 ## Cards to a row: as many CARD_MIN_W cards as the page is wide (4 at the game's 480), never
 ## fewer than MIN_COLS.
@@ -191,17 +202,6 @@ func _regroup() -> void:
 	schools = []
 	for g in groups:
 		schools.append_array(g.ids.map(func(id): return Colleges.school(id)))
-	# (`schools` stays the Road to Glory's thirty; the expansion's come after, a group a conference)
-	for cf in Colleges.EXPANSION_CONFERENCES:
-		var d := int(cf.div)
-		if not Colleges.division_enabled(d):
-			continue   # (hibernated: not even a locked group)
-		var ids: Array = Colleges.schools_in(String(cf.id)).map(func(s): return String(s.short))
-		ids.sort_custom(func(a, b): return (preview.teams[a] as PoloTeam).team_overall(false) > (preview.teams[b] as PoloTeam).team_overall(false))
-		var owned := Store.division_owned(d)
-		var head := "%s  -  %s" % [Colleges.division_name(d), String(cf.abbr)]
-		groups.append({"tier": 10 + groups.size(), "div": d, "open": owned, "ids": ids,
-			"title": head if owned else "LOCKED — %s EXPANSION PACK  -  %s" % [Colleges.division_name(d), String(cf.abbr)]})
 
 ## The offer's shown only while you don't own it and a school is still locked to you.
 func _offer_shown(n_open: int) -> bool:
@@ -517,10 +517,9 @@ func _step_coach() -> void:
 	var modes := UI.hbox(4)
 	for m in Difficulty.MODES:
 		var mm: String = m
-		var on := Difficulty.mode() == mm
+		var on := Difficulty.new_career_mode() == mm
 		var b := UI.button(Difficulty.NAMES[mm], func():
-			Game.settings.difficulty = mm
-			Game.save_settings()
+			Difficulty.pick_new_career(mm)
 			_render(), "normal", MODE_W, 18)
 		b.add_theme_font_override("font", UI.font_caps)
 		var fill := UI.GOLD if on else Deck.NAVY
@@ -535,10 +534,7 @@ func _step_coach() -> void:
 		modes.add_child(b)
 	form.add_child(UI.spacer(0, 2))
 	form.add_child(_form_row("DIFFICULTY", modes))
-	if Colleges.lower_divisions:   # (Division I alone: nothing to choose)
-		form.add_child(UI.spacer(0, 2))
-		form.add_child(_form_row("ACTIVE DIVISIONS", _division_row()))
-	var desc := para("DYNAMIC: starts at MEDIUM and follows how your last few games went." if Difficulty.mode() == "dynamic" else "You can change this any time in Settings.", UI.TEXT, 300)
+	var desc := para("DYNAMIC: starts between EASY and MEDIUM and follows how your last few games went." if Difficulty.new_career_mode() == "dynamic" else "You can change this any time in Settings.", UI.TEXT, 300)
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.add_child(UI.spacer(0, 2))
 	body.add_child(desc)
@@ -549,37 +545,6 @@ func _step_coach() -> void:
 	bc.add_child(start)
 	body.add_child(bc)
 	body.add_child(UI.spacer(0, 4, true))
-
-## SELECT ACTIVE DIVISIONS: Division I is the base game; a pack you own switches on or off for this
-## dynasty (yours can't be off); one you don't own shows locked and can't be pressed.
-func _division_row() -> Control:
-	var row := UI.hbox(4)
-	row.name = "ActiveDivisions"
-	var base := UI.button("I  BASE GAME", Callable(), "normal", 0, 18)
-	base.name = "Div1"
-	base.disabled = true
-	row.add_child(base)
-	for d in [Colleges.D2, Colleges.D3]:
-		var dv: int = d
-		var owned := Store.division_owned(dv)
-		var mine := Colleges.division_of(pick) == dv
-		var on: bool = owned and (mine or not div_off.get(dv, false))
-		var text: String = "LOCKED" if not owned else ("ENABLED" if on else "DISABLED")
-		var b := UI.button("%s  %s" % [["", "I", "II", "III"][dv], text], func():
-			div_off[dv] = not div_off.get(dv, false)
-			_render(), "primary" if on else "normal", 0, 18)
-		b.name = "Div%d" % dv
-		b.disabled = not owned or mine
-		row.add_child(b)
-	return row
-
-## The divisions this dynasty will play.
-func active_divisions() -> Array:
-	var out: Array = [Colleges.D1]
-	for d in [Colleges.D2, Colleges.D3]:
-		if Colleges.division_enabled(d) and Store.division_owned(d) and (Colleges.division_of(pick) == d or not div_off.get(d, false)):
-			out.append(d)
-	return out
 
 ## A form line: the caps label in a fixed column, then the control.
 func _form_row(text: String, control: Control) -> Control:
@@ -599,13 +564,16 @@ func _start() -> void:
 		Game.toast("Your coach needs a first and last name", UI.WARN)
 		return
 	# (Game.start_career checks the school again: a locked one is refused and nothing is touched)
-	if not Game.start_career(pick, _cap(f), _cap(l), -1, active_divisions()):
+	if not Game.start_career(pick, _cap(f), _cap(l)):
 		Game.toast("That school is locked", UI.WARN)
 		step = 0
 		_render()
 		return
 	Game.history.clear()
-	Game.goto("drill", {"career": true}, false)   # the tutorial first: it hands on to the hub
+	if Game.career.tutorial == Career.TUTORIAL_PENDING:
+		Game.goto("drill", {"career": true}, false)   # the first dynasty: the tutorial first, it hands on to the hub
+	else:
+		Game.goto("hub", {}, false)
 
 static func _cap(s: String) -> String:
 	return s.substr(0, 1).to_upper() + s.substr(1)

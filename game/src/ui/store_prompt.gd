@@ -2,22 +2,22 @@ class_name StorePrompt
 extends RefCounted
 ## Store prompts shown in the flow of play:
 ##   need()        - a coin cost: do it if the coins are there, else say so, with the way to the
-##                   Yellow Coin Shop.
+##                   Polo Points Shop.
 ##   pro_locked()  - a PRO feature was tapped: show PRO and unlock it on the spot.
 ##   buy_then()    - buy a product and run a callback when it lands.
 ## Plus value helpers used by the store screen (what a pack buys, the next upgrade).
 
 static var _waiters: Array = []
 
-## Runs `action` if the Yellow Coins cover `cost`, otherwise says how many it's short.
+## Runs `action` if the Polo Points cover `cost`, otherwise says how many it's short.
 static func need(c: Career, cost: int, what: String, action: Callable) -> void:
 	if Wallet.can_afford_yellow(c, cost):
 		action.call()
 		return
 	var short := cost - c.wallet()
-	Game.dialog("NOT ENOUGH YELLOW COINS", "%s costs %s and you have %s: %s short.\n\nYellow Coins come from games, the season's start, achievements and coaching events, or the Yellow Coin Shop." % [
+	Game.dialog("NOT ENOUGH POLO POINTS", "%s costs %s and you have %s: %s short.\n\nPolo Points come from games, the season's start, achievements and coaching events, or the Polo Points Shop (its LUCKY SPIN is free with an ad)." % [
 		what, CreditCoin.tag(cost), CreditCoin.tag(c.wallet()), CreditCoin.tag(short)], [
-		["YELLOW COIN SHOP", func(): Game.goto("store"), "primary"],
+		["POLO POINTS SHOP", func(): Game.goto("store"), "primary"],
 		["OK", Callable(), "ghost"]])
 
 static func pro_locked(feature: String = "") -> void:
@@ -51,7 +51,7 @@ class Waiter extends RefCounted:
 		if ok:
 			var p := Store.product(id)
 			if p.has("credits"):
-				Game.toast("%s Yellow Coins" % CreditCoin.tag(int(p.credits), true), UI.GOLD)
+				Game.toast("%s Polo Points" % CreditCoin.tag(int(p.credits), true), UI.GOLD)
 			elif message != "":
 				Game.toast(message, UI.GOLD)   # (a restore: what came back)
 			if on_ok.is_valid():

@@ -476,8 +476,9 @@ func _colors() -> void:
 	r.check(_row(3.0, 5.0, 1) == "G G G R .", "3 stars HOT: 3 gold, a red star straight after them")
 	r.check(_row(3.0, 5.0, 2) == "G G G R R", "3 stars VERY HOT: 3 gold, two red stars")
 	r.check(_row(2.5, 5.0, 1) == "G G g R .", "2.5 stars HOT: a whole red star in the next place after the gold")
-	r.check(_row(5.0, 5.0, 2) == "G G G R R", "a five-star VERY HOT: his two red stars take the last two places")
-	r.check(_row(4.0, 5.0, 2) == "G G G R R", "a four-star VERY HOT: still two red stars (the gold gives way)")
+	r.check(_row(5.0, 5.0, 2) == "G G G G G R R", "a five-star VERY HOT: five gold, then two red (seven places)")
+	r.check(_row(5.0, 5.0, 1) == "G G G G G R", "a five-star HOT: five gold, then one red (six places)")
+	r.check(_row(4.0, 5.0, 2) == "G G G G R R", "a four-star VERY HOT: four gold, then two red (the gold never gives way)")
 	r.check(_row(1.0, 2.0, 1) == "G R", "a one-star HOT: his red star in the place after the gold (the bar ends at his POTENTIAL)")
 	var f4 := Deck.star_fills(3.0, 4.0, 0)
 	r.check(f4.size() == 4 and f4[3].pot == 1.0, "3 of 4 POTENTIAL: four places, no fifth past his POTENTIAL")
@@ -491,9 +492,9 @@ func _colors() -> void:
 				var lit := 0.0
 				for f in fs:
 					lit += maxf(float(f.gold), float(f.form))
-				if fs.size() != Deck.star_count(ci * 0.5, pi * 0.5, red) or fs.size() > Deck.STAR_PLACES or lit > 5.0 + 1e-6 or lit < ci * 0.5 - 1e-6:
+				if fs.size() != Deck.star_count(ci * 0.5, pi * 0.5, red) or fs.size() > Deck.STAR_PLACES + red or not is_equal_approx(lit, ci * 0.5 + red):
 					all_five = false
-	r.check(all_five, "every CURRENT x POTENTIAL x form: star_count places (five at most), never more lit than five")
+	r.check(all_five, "every CURRENT x POTENTIAL x form: star_count places (five plus his red at most), lit = his gold + his red")
 	var src := FileAccess.get_file_as_string("res://src/ui/deck.gd") + FileAccess.get_file_as_string("res://src/ui/star_fx.gd")
 	r.check(not src.contains("ICE_STAR") and not src.contains("ICE_COLS") and not src.contains("FORM_PLACES") and not src.contains("COLD"),
 		"no frozen stars, cold colours or form place left in the star bar")

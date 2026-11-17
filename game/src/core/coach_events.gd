@@ -118,8 +118,8 @@ const EVENTS := [
 			{"label": "LEARN THROUGH ADVERSITY", "text": "If the next one is lost, make it count."}]},
 	{"id": "cost_of_victory", "cat": "money", "weight": 1.0, "cooldown": 4, "headline": "THE COST OF VICTORY", "subject": "team",
 		"stories": [
-			"A {score} win, but it took everything. {heavy} carried the load and are feeling it. Spend credits to reward them, or keep the money and challenge {name}?",
-			"{score}. The team found a way, but nobody left the pool fresh. Reward {heavy} with extra recovery, or save the credits and set {name} a challenge?"],
+			"A {score} win, but it took everything. {heavy} carried the load and are feeling it. Spend Polo Points to reward them, or keep the money and challenge {name}?",
+			"{score}. The team found a way, but nobody left the pool fresh. Reward {heavy} with extra recovery, or save the Polo Points and set {name} a challenge?"],
 		"choices": [
 			{"label": "INVEST IN THE TEAM", "text": "Extra recovery for the hardest workers."},
 			{"label": "INDIVIDUAL CHALLENGE", "text": "Keep the money. Challenge {name}."}]},
@@ -141,6 +141,7 @@ const XP := {"star_praise": 80, "backup_reward": 40, "backup_ok": 150, "leader":
 const COINS := {"ripple_now": 20, "ripple_cost": 15, "ripple_win": 50, "private": 15, "recovery": 15}
 ## HOT STAR PROGRESS, in parts of a GOOD grade (the bar is the run over PlayerForm.HOT_AT = 3,
 ## so 0.3 is 10 percentage points of it): +20 / +30 points, and 10 points lost on a failure.
+## A challenge that risks those 10 on a failure pays the same 10 on a success (FAIL_HOT).
 const HOT := {"star_praise": 0.6, "keeper": 0.9, "loss": 0.3}
 const COLD_RECOVERY := 2      # A ROUGH NIGHT's encouragement forgives his last two BAD grades (doubled)
 const MULT_2X := 2.0
@@ -151,7 +152,8 @@ const PMW_LOSS := 0.75
 ## CAPTAIN'S SPEECH), when he played. Events not here have no failure penalty.
 const FAIL_MULT := {"star_in_making": 0.75, "backup_breakout": 0.5, "captains_speech": 0.75, "keeper_confidence": 0.5,
 	"rough_night": 0.5, "defensive_masterclass": 0.75, "big_rivalry": 0.5, "learning_experience": 0.75, "cost_of_victory": 0.75}
-## ...and 10 points of his HOT STAR PROGRESS too.
+## ...and 10 points of his HOT STAR PROGRESS too; making the challenge earns him the same 10
+## (HOT.loss both ways: the risk and the reward always equal).
 const FAIL_HOT := ["star_in_making", "keeper_confidence"]
 
 ## THE RARE SPECIAL CHALLENGE: when one of these four is drawn, a 1 in 20 chance (rolled once,
@@ -670,45 +672,46 @@ static func game_line(pl: Dictionary, rv: Dictionary = {}) -> String:
 ## Short: the reward, the target, SUCCESS and FAILURE. The same numbers apply() uses.
 static func stakes(c: Career, ev: Dictionary, i: int) -> Array:
 	var who := _name(c, int(ev.get("pid", 0)))
+	var tag := _maxed_tag(c, int(ev.get("pid", 0)))
 	var id := String(ev.id)
 	var out: Array = []
 	match [id, i]:
 		["star_in_making", 0]:
-			out = [["+%d XP TO %s" % [XP.star_praise, who], "good"], ["+%d%% HOT STAR PROGRESS" % _pp(HOT.star_praise), "good"]]
+			out = [["+%d XP TO %s%s" % [XP.star_praise, who, tag], "good"], ["+%d%% HOT STAR PROGRESS" % _pp(HOT.star_praise), "good"]]
 		["backup_breakout", 0]:
-			out = [["+%d XP TO %s" % [XP.backup_reward, who], "good"]]
+			out = [["+%d XP TO %s%s" % [XP.backup_reward, who, tag], "good"]]
 		["backup_breakout", 1]:
 			out = [["%s: 2 GOALS NEXT GAME HE PLAYS" % who, "info"], ["SUCCESS: +%d XP" % XP.backup_ok, "good"],
 				["FAILURE: %s GAME XP" % mx(FAIL_MULT.backup_breakout), "bad"], ["(WAITS UP TO %d GAMES FOR HIM TO PLAY)" % WAIT_GAMES, "info"]]
 		["captains_speech", 0]:
-			out = [["+%d XP TO %s (TEAM LEADER)" % [XP.leader, who], "good"]]
+			out = [["+%d XP TO %s%s (TEAM LEADER)" % [XP.leader, who, tag], "good"]]
 		["captains_speech", 1]:
 			out = [["WIN NEXT GAME: +%d XP EACH TO ALL WHO PLAY" % XP.team_win, "good"],
 				["LOSE: %s GAME XP FOR ALL WHO PLAY" % mx(FAIL_MULT.captains_speech), "bad"]]
 		["keeper_confidence", 0]:
-			out = [["+%d XP TO %s" % [XP.keeper, who], "good"], ["+%d%% HOT STAR PROGRESS" % _pp(HOT.keeper), "good"]]
+			out = [["+%d XP TO %s%s" % [XP.keeper, who, tag], "good"], ["+%d%% HOT STAR PROGRESS" % _pp(HOT.keeper), "good"]]
 		["rough_night", 0]:
 			var p := c.team().find_id(int(ev.get("pid", 0)))
 			var bad := 0 if p == null else mini(COLD_RECOVERY, p.form.filter(func(x): return int(x) == PlayerForm.BAD).size())
-			out = [["+%d XP TO %s" % [XP.rough_encourage, who], "good"],
+			out = [["+%d XP TO %s%s" % [XP.rough_encourage, who, tag], "good"],
 				["DOUBLE COLD RECOVERY: LAST %d BAD GRADE%s FORGIVEN" % [bad, "" if bad == 1 else "S"] if bad > 0 else "(NO BAD GRADE TO FORGIVE)", "good" if bad > 0 else "info"]]
 		["rough_night", 1]:
 			out = _chal_text(c, ev, "+%d XP" % XP.rough_ok)
 		["defensive_masterclass", 0]:
-			out = [["+%d XP TO %s" % [XP.def_star, who], "good"]]
+			out = [["+%d XP TO %s%s" % [XP.def_star, who, tag], "good"]]
 		["recruiting_ripple", 0]:
-			out = [["+%d CREDITS NOW" % COINS.ripple_now, "good"]]
+			out = [["+%d{coin} NOW" % COINS.ripple_now, "good"]]
 		["recruiting_ripple", 1]:
-			out = [["-%d CREDITS NOW" % COINS.ripple_cost, "bad"], ["WIN NEXT GAME: +%d CREDITS" % COINS.ripple_win, "good"],
-				["LOSE: THE %d IS GONE" % COINS.ripple_cost, "bad"]]
+			out = [["-%d{coin} NOW" % COINS.ripple_cost, "bad"], ["WIN NEXT GAME: +%d{coin}" % COINS.ripple_win, "good"],
+				["LOSE: THE %d{coin} IS GONE" % COINS.ripple_cost, "bad"]]
 		["practice_discipline", 0]:
-			out = [["-%d CREDITS NOW" % COINS.private, "bad"], ["+%d XP TO %s" % [XP.private, who], "good"], ["%s STAYS AVAILABLE" % who, "info"]]
+			out = [["-%d{coin} NOW" % COINS.private, "bad"], ["+%d XP TO %s%s" % [XP.private, who, tag], "good"], ["%s STAYS AVAILABLE" % who, "info"]]
 		["practice_discipline", 1]:
 			var rep := suspension_ok(c.team(), c.team().find_id(int(ev.get("pid", 0)))) if c.team().find_id(int(ev.get("pid", 0))) != null else null
 			out = [["%s MISSES THE NEXT GAME" % who, "bad"],
 				["%s STARTS: 2X GAME XP IF HE PLAYS" % (rep.short_name().to_upper() if rep != null else "A REPLACEMENT"), "good"]]
 		["big_rivalry", 0]:
-			out = [["+%d XP TO %s (TEAM LEADER)" % [XP.rivalry_calm, who], "good"]]
+			out = [["+%d XP TO %s%s (TEAM LEADER)" % [XP.rivalry_calm, who, tag], "good"]]
 		["big_rivalry", 1]:
 			if is_special(ev):
 				var ch := challenge(c, ev)
@@ -717,17 +720,17 @@ static func stakes(c: Career, ev: Dictionary, i: int) -> Array:
 			else:
 				out = [["WIN: %s 2X GAME XP" % who, "good"], ["LOSE: %s %s GAME XP" % [who, mx(FAIL_MULT.big_rivalry)], "bad"]]
 		["learning_experience", 0]:
-			out = [["+%d XP TO %s" % [XP.learn, who], "good"]]
+			out = [["+%d XP TO %s%s" % [XP.learn, who, tag], "good"]]
 		["learning_experience", 1]:
 			var ch := challenge(c, ev)
-			out = [["LOSE + %s %s: 2X GAME XP" % [who, ch.label], "good"], ["LOSE, TARGET MISSED: %s GAME XP" % mx(FAIL_MULT.learning_experience), "bad"],
+			out = [["LOSE & %s %s: 2X GAME XP" % [who, ch.label], "good"], ["LOSE, TARGET MISSED: %s GAME XP" % mx(FAIL_MULT.learning_experience), "bad"],
 				["WIN: NORMAL GAME XP", "info"]]
 		["cost_of_victory", 0]:
-			out = [["-%d CREDITS NOW" % COINS.recovery, "bad"], ["+%d XP EACH TO %s" % [XP.recovery, ", ".join((ev.get("heavy", []) as Array).map(func(id): return _name(c, int(id))))], "good"]]
+			out = [["-%d{coin} NOW" % COINS.recovery, "bad"], ["+%d XP EACH TO %s" % [XP.recovery, ", ".join((ev.get("heavy", []) as Array).map(func(id): return _name(c, int(id)) + _maxed_tag(c, int(id))))], "good"]]
 		["cost_of_victory", 1]:
 			out = _chal_text(c, ev, "+%d XP" % XP.cost_ok)
 		["prove_me_wrong", 0]:
-			out = [["+%d XP NOW TO %s" % [XP.pmw_safe, who], "good"], ["NO LINEUP CHANGE, NO WAGER", "info"]]
+			out = [["+%d XP NOW TO %s%s" % [XP.pmw_safe, who, tag], "good"], ["NO LINEUP CHANGE, NO WAGER", "info"]]
 		["prove_me_wrong", 1]:
 			out = [["%s STARTS NEXT GAME (%s TO THE BENCH)" % [who, _name(c, int(ev.get("displaced", 0)))], "info"],
 				["WIN: TEAM 1.5X GAME XP, %s 2X" % who, "good"],
@@ -746,6 +749,8 @@ static func _chal_text(c: Career, ev: Dictionary, reward: String) -> Array:
 	var ch := challenge(c, ev)
 	var id := String(ev.id)
 	var out: Array = [["%s: %s NEXT GAME" % [_name(c, int(ev.get("pid", 0))), ch.label], "info"], ["SUCCESS: %s" % reward, "good"]]
+	if id in FAIL_HOT:
+		out.append(["SUCCESS: +%d%% HOT STAR PROGRESS" % _pp(HOT.loss), "good"])
 	if FAIL_MULT.has(id):
 		out.append(["FAILURE: %s GAME XP" % mx(float(FAIL_MULT[id])), "bad"])
 	else:
@@ -793,7 +798,7 @@ static func blocked(c: Career, ev: Dictionary, i: int) -> String:
 		["practice_discipline", 0]: cost = COINS.private
 		["cost_of_victory", 0]: cost = COINS.recovery
 	if cost > 0 and c.wallet() < cost:
-		return "NOT ENOUGH CREDITS (%d NEEDED)" % cost
+		return "NOT ENOUGH POLO POINTS (%d NEEDED)" % cost
 	if [String(ev.id), i] == ["prove_me_wrong", 1]:
 		var p := c.team().find_id(int(ev.get("pid", 0)))
 		if p == null or promotion(c.team(), p).is_empty():
@@ -807,6 +812,11 @@ static func blocked(c: Career, ev: Dictionary, i: int) -> String:
 static func _name(c: Career, pid: int) -> String:
 	var p := c.team().find_id(pid)
 	return p.short_name().to_upper() if p != null else "HIM"
+
+## " (MAXED XP)" when event XP would do him no good (give_xp skips him), else "".
+static func _maxed_tag(c: Career, pid: int) -> String:
+	var p := c.team().find_id(pid)
+	return " (MAXED XP)" if p != null and (Development.is_maxed(p) or p.tokens >= Development.boxes_left(p)) else ""
 
 # ------------------------------------------------------------------ applying a choice
 ## Applies choice `i` of event `ev` once (the caller clears the pending event and saves): what
@@ -847,14 +857,14 @@ static func apply(c: Career, ev: Dictionary, i: int) -> Array:
 			out.append_array(_xp_now(c, [p], XP.pmw_safe))
 		["recruiting_ripple", 0]:
 			c.add_credits(COINS.ripple_now, "COACHING EVENT")
-			out.append(["+%d CREDITS" % COINS.ripple_now, "good"])
+			out.append(["+%d{coin}" % COINS.ripple_now, "good"])
 		["recruiting_ripple", 1]:
 			c.spend_credits(COINS.ripple_cost, "COACHING EVENT")
-			out.append(["-%d CREDITS: RECRUITING OUTREACH" % COINS.ripple_cost, "bad"])
-			out.append(_pend(c, ev, head, {"k": "invest", "need": "win", "coins": COINS.ripple_win, "label": "WIN THE NEXT GAME", "reward": "+%d CREDITS" % COINS.ripple_win}))
+			out.append(["-%d{coin}: RECRUITING OUTREACH" % COINS.ripple_cost, "bad"])
+			out.append(_pend(c, ev, head, {"k": "invest", "need": "win", "coins": COINS.ripple_win, "label": "WIN THE NEXT GAME", "reward": "+%d{coin}" % COINS.ripple_win}))
 		["practice_discipline", 0]:
 			c.spend_credits(COINS.private, "COACHING EVENT")
-			out.append(["-%d CREDITS: EXTRA ONE-ON-ONE COACHING" % COINS.private, "bad"])
+			out.append(["-%d{coin}: EXTRA ONE-ON-ONE COACHING" % COINS.private, "bad"])
 			out.append_array(_xp_now(c, [p], XP.private))
 			out.append(["%s STAYS AVAILABLE" % _name(c, pid), "info"])
 		["practice_discipline", 1]:
@@ -874,10 +884,10 @@ static func apply(c: Career, ev: Dictionary, i: int) -> Array:
 		["learning_experience", 1]:
 			var ch := challenge(c, ev)
 			out.append(_pend(c, ev, head, {"k": "learn", "stat": ch.stat, "n": int(ch.n), "mult": MULT_2X, "fail_mult": fail,
-				"label": "LOSE + %s %s" % [_name(c, pid), ch.label], "reward": "2X GAME XP / MISSED: %s / WIN: NORMAL" % mx(fail)}))
+				"label": "LOSE & %s %s" % [_name(c, pid), ch.label], "reward": "2X GAME XP / MISSED: %s / WIN: NORMAL" % mx(fail)}))
 		["cost_of_victory", 0]:
 			c.spend_credits(COINS.recovery, "COACHING EVENT")
-			out.append(["-%d CREDITS: RECOVERY SUPPORT" % COINS.recovery, "bad"])
+			out.append(["-%d{coin}: RECOVERY SUPPORT" % COINS.recovery, "bad"])
 			out.append_array(_xp_now(c, _players(c, ev.get("heavy", [])), XP.recovery))
 		["prove_me_wrong", 1]:
 			out.append_array(_promote(c, ev, head))
@@ -890,13 +900,17 @@ static func apply(c: Career, ev: Dictionary, i: int) -> Array:
 				"rough_night": ok = {"xp": XP.rough_ok}
 				"cost_of_victory": ok = {"xp": XP.cost_ok}
 				_: ok = {"mult": float(ch.mult)}
+			var hot := id in FAIL_HOT
 			var e := {"k": "chal", "stat": ch.stat, "n": int(ch.n), "label": "%s %s" % [_name(c, pid), ch.label],
-				"reward": (("+%d XP" % int(ok.xp)) if ok.has("xp") else "%s GAME XP" % mx(float(ok.mult))) + (" / MISS: %s" % mx(fail) if fail > 0.0 else ""),
+				"reward": (("+%d XP" % int(ok.xp)) if ok.has("xp") else "%s GAME XP" % mx(float(ok.mult)))
+					+ (", +%d%% HOT STAR" % _pp(HOT.loss) if hot else "")
+					+ (" / MISS: %s" % mx(fail) if fail > 0.0 else "") + (", -%d%% HOT STAR" % _pp(HOT.loss) if hot else ""),
 				"wait": id == "backup_breakout"}
 			if fail > 0.0:
 				e["fail_mult"] = fail
-			if id in FAIL_HOT:
+			if hot:
 				e["hot_loss"] = HOT.loss
+				e["hot_gain"] = HOT.loss   # (the reward equals the risk)
 			e.merge(ok)
 			out.append(_pend(c, ev, head, e))
 	return out
@@ -984,8 +998,88 @@ static func _hot(p: PoloPlayer, amount: float) -> Array:
 	if p == null:
 		return ["", "info"]
 	var before := p.heat_bonus
-	p.heat_bonus = minf(1.0, p.heat_bonus + amount)
-	return ["+%d%% HOT STAR PROGRESS FOR %s" % [roundi((p.heat_bonus - before) / PlayerForm.HOT_AT * 100.0), p.short_name().to_upper()], "good"]
+	p.heat_bonus = maxf(before, minf(1.0, p.heat_bonus + amount))
+	var gained := roundi((p.heat_bonus - before) / PlayerForm.HOT_AT * 100.0)
+	if gained <= 0:
+		return ["(%s'S COACHING HOT STAR PROGRESS IS ALREADY AT ITS LIMIT)" % p.short_name().to_upper(), "info"]
+	return ["+%d%% HOT STAR PROGRESS FOR %s" % [gained, p.short_name().to_upper()], "good"]
+
+# ------------------------------------------------------------------ the CPU's coaching
+## CPU schools' coaches: the HOT STAR help your coaching events give your players, given to
+## theirs at the same rate, so a CPU seven heats up like yours (the grades themselves were
+## always the same rule for everyone). After each CPU team's graded game, at most one of:
+##   A STAR IN THE MAKING     a freshman's or sophomore's 3+ goals (or 2+ in 4+ goals and
+##                            assists), a young keeper's 12+ saves at 60%+: +HOT.star_praise
+##   A GOALKEEPER'S CONFIDENCE the keeper's 10+ saves at 60%+: +HOT.keeper
+##   A ROUGH NIGHT            4+ shots and no goal, a keeper's 9+ against under 40%: his last
+##                            COLD_RECOVERY BAD grades forgiven
+## the same conditions as yours, each taken CPU_DRAW of the times it fits: how often your own
+## draw (CHANCE, the categories, the cooldowns) lands on it when it fits, measured over simulated
+## seasons (--test cpu_coach_measure), with the coach always picking the answer that helps.
+## Its own die (seeded from the game), so the career's draws stay as they were.
+const CPU_DRAW := {"star_in_making": 0.20, "keeper_confidence": 0.20, "rough_night": 0.14}
+## Measurement only (tests): false leaves the CPU's coaches out. Always true in the game.
+static var cpu_coaching := true
+
+## `t` (a CPU school) after a graded game: `lines` {id: stat line}, `assists` the players credited
+## with an assist (one entry each). Returns {"id", "p"} for what was given, {} for nothing.
+static func cpu_coach(c: Career, t: PoloTeam, lines: Dictionary, assists: Array = []) -> Dictionary:
+	if t == null or t.id == c.school or not cpu_coaching:
+		return {}
+	var seven := t.starters()
+	if seven.is_empty():
+		return {}
+	var star: PoloPlayer = null
+	var star_v := 0.0
+	var rough: PoloPlayer = null
+	var rough_v := 0.0
+	var keeper: PoloPlayer = null
+	for p: PoloPlayer in seven:
+		if not lines.has(p.id):
+			continue
+		var ln: Dictionary = lines[p.id]
+		var g := int(ln.get("g", 0))
+		var sv := int(ln.get("sv", 0))
+		var ga := int(ln.get("ga", 0))
+		var pct := Postgame.save_pct(ln)
+		var sv_v := 0.0
+		var rv_v := 0.0
+		if p.is_keeper() or bool(ln.get("gk", false)):
+			if sv >= 12 and pct >= 0.6:
+				sv_v = sv * 0.4
+			if sv >= 10 and pct >= 0.6:
+				keeper = p
+			if ga >= 9 and pct < 0.4:
+				rv_v = float(ga)
+		else:
+			var a := assists.count(p)
+			if g >= 3 or (g >= 2 and g + a >= 4):
+				sv_v = g * 2.0 + a + (1.0 if p.year == 1 else 0.0)
+			if int(ln.get("sh", 0)) >= 4 and g == 0:
+				rv_v = float(ln.get("sh", 0))
+		if p.year <= 2 and sv_v > star_v:
+			star = p
+			star_v = sv_v
+		if rv_v > rough_v:
+			rough = p
+			rough_v = rv_v
+	var fits := {"star_in_making": star, "keeper_confidence": keeper, "rough_night": rough}
+	var die := RandomNumberGenerator.new()
+	die.seed = hash([c.rng.seed, c.year, c.week, t.id, lines.keys(), lines.values(), "cpu_coach"])
+	var roll := die.randf()
+	for id in ["star_in_making", "keeper_confidence", "rough_night"]:
+		var p: PoloPlayer = fits[id]
+		if p == null:
+			continue
+		roll -= float(CPU_DRAW[id])
+		if roll >= 0.0:
+			continue
+		match id:
+			"star_in_making": _hot(p, HOT.star_praise)
+			"keeper_confidence": _hot(p, HOT.keeper)
+			"rough_night": _forgive(p, COLD_RECOVERY)
+		return {"id": id, "p": p}
+	return {}
 
 ## COLD recovery: his most recent `n` BAD grades forgiven (NORMAL), his heat as it was.
 static func _forgive(p: PoloPlayer, n: int = 1) -> Array:
@@ -1052,7 +1146,7 @@ static func cool(p: PoloPlayer) -> bool:
 ## target) or "void". Each player gets ONE multiplier on his positive game XP, never two: PROVE
 ## ME WRONG's for everyone who played when it's on; else the biggest bonus he made (2X, 3X);
 ## else his failure penalty (0.75X, 0.5X). Then event XP and credits paid, HOT STAR PROGRESS
-## lost, a promoted backup's bar reset on a loss, the suspensions served, the lineup put back.
+## won or lost, a promoted backup's bar reset on a loss, the suspensions served, the lineup put back.
 ## Each consequence once: it's removed from Career.coach_pending and its result saved
 ## (Career.coach_results). Returns Development.award_game's.
 static func award_game(c: Career, t: PoloTeam, lines: Dictionary, won: bool) -> Dictionary:
@@ -1177,6 +1271,11 @@ static func award_game(c: Career, t: PoloTeam, lines: Dictionary, won: bool) -> 
 					ln.append(["NORMAL GAME XP APPLIED", "info"])
 				if s[1] == "fail" and e.has("hot_loss") and lines.has(who):
 					ln.append(hot_loss(t.find_id(who), float(e.hot_loss)))
+				elif ok and lines.has(who) and (e.has("hot_gain") or e.has("hot_loss")):
+					# made it: the HOT STAR PROGRESS it risked, won instead (a challenge saved before the
+					# reward existed has only its hot_loss: the same amount). Once: the consequence is
+					# settled here and leaves coach_pending.
+					ln.append(_hot(t.find_id(who), float(e.get("hot_gain", e.get("hot_loss", 0.0)))))
 			"team":
 				if ok:
 					ln.append_array(_xp_now(c, _players(c, lines.keys()), int(e.xp)))
@@ -1190,9 +1289,9 @@ static func award_game(c: Career, t: PoloTeam, lines: Dictionary, won: bool) -> 
 			"invest":
 				if ok:
 					c.add_credits(int(e.coins), "COACHING EVENT")
-					ln.append(["+%d CREDITS" % int(e.coins), "good"])
+					ln.append(["+%d{coin}" % int(e.coins), "good"])
 				else:
-					ln.append(["THE %d CREDITS ARE GONE" % COINS.ripple_cost, "bad"])
+					ln.append(["THE %d{coin} ARE GONE" % COINS.ripple_cost, "bad"])
 			"susp":
 				var g: Dictionary = got.get(int(e.rep), {})
 				if ok and g.has("mult"):

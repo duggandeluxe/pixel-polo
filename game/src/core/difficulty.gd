@@ -1,9 +1,10 @@
 class_name Difficulty
-## How hard a match plays: EASY, MEDIUM (saved as "normal"), HARD or DYNAMIC. MEDIUM is the
-## default; DYNAMIC starts at MEDIUM and follows how you've played your last few games.
+## How hard a match plays: EASY, MEDIUM (saved as "normal"), HARD or DYNAMIC. A new dynasty
+## starts at DYNAMIC (NEW_CAREER_MODE); Quick Match's default is MEDIUM. DYNAMIC starts halfway between EASY and MEDIUM (DYN_START)
+## and follows how you've played your last few games.
 ##
 ## THE CPU'S TIMING AND PACE (the Difficulty Gameplay Balancing update): on top of its decisions,
-## three things the other team does are quicker or slower with the level, MEDIUM exactly as before
+## three things the other team does are quicker with the level, EASY exactly as first tuned
 ## (CPU, cpu_shot_speed / cpu_keeper_react / cpu_arm_delay): its shots' speed (fixed at the
 ## release, after the shooter's own SHOOTING and the pull have made it: a full pull gains most), its
 ## keeper's reaction and recognition (from what he can already see: never the aim, never a
@@ -32,9 +33,12 @@ const NAMES := {"dynamic": "DYNAMIC", "easy": "EASY", "normal": "MEDIUM", "hard"
 const FIXED := {"easy": 0.0, "normal": 0.5, "hard": 1.0}
 const DEFAULT_MODE := "normal"
 const MEDIUM := 0.5
-const TEAMMATES := MEDIUM
-const MULTIPLAYER := MEDIUM
-const DYN_START := MEDIUM
+## The game as first tuned (the old MEDIUM, EASY since the re-tier): your own AI teammates,
+## multiplayer and every bench / default that means "the game as it plays" stay here.
+const BASELINE := 0.0
+const TEAMMATES := BASELINE
+const MULTIPLAYER := BASELINE
+const DYN_START := 0.25           # DYNAMIC starts halfway between EASY and MEDIUM
 const DYN_MAX_STEP := 0.05        # the most one completed game moves DYNAMIC
 const DYN_WINDOW := 5             # ...judged on this many recent games
 const DYN_RECENT := 0.85          # each older game in the window counts this much less than the one after it
@@ -48,43 +52,58 @@ const MATCHUP_EVEN := 0.6         # attribute points apart and still a comparabl
 const MATCHUP_FAR := 1.6          # ...this far apart, a mismatch: the expected result barely counts
 const MISMATCH_WEIGHT := 0.2
 
-## The AI's decision parameters at EASY, MEDIUM, HARD (x, y, z). MEDIUM is the game as it played
-## before difficulty became decisions; the reference for balancing.
+## The AI's decision parameters at EASY, MEDIUM, HARD (x, y, z). Re-tiered 2026-11-16: EASY is the
+## old MEDIUM (the game as first tuned: BASELINE), MEDIUM the old HARD, HARD a new, harder level
+## past it. (The old EASY is gone.)
 const PARAMS := {
 	# reading the play
-	"recognize": Vector3(0.7, 0.35, 0.15),   # s a defender takes to see a man has inside water on him (CenterDefense)
-	"read": Vector3(0.75, 1.0, 1.3),         # how sharply defenders re-read where they should be (PlayAI._defend)
-	"switch": Vector3(1.3, 1.0, 0.8),        # the centre's guard waits this share of his time before going round
+	"recognize": Vector3(0.35, 0.11, 0.05),   # s a defender takes to see a man has inside water on him (CenterDefense)
+	"read": Vector3(1.0, 1.45, 1.8),          # how sharply defenders re-read where they should be (PlayAI._defend)
+	"switch": Vector3(1.0, 0.7, 0.5),         # the centre's guard waits this share of his time before going round
 	# positioning and rotations (defence)
-	"pos_err": Vector3(0.6, 0.0, 0.0),      # m a defender's spot can be off (a positioning mistake)
-	"lane_deny": Vector3(0.2, 0.45, 0.65),   # m off his man into the passing lane from the ball
-	"help": Vector3(0.12, 0.35, 0.5),        # how far the far side sags into the hole to help on the centre
+	"pos_err": Vector3(0.0, 0.0, 0.0),        # m a defender's spot can be off (a positioning mistake)
+	"lane_deny": Vector3(0.45, 0.75, 0.95),   # m off his man into the passing lane from the ball
+	"help": Vector3(0.35, 0.58, 0.75),        # how far the far side sags into the hole to help on the centre
 	# offence (OffenseAI)
-	"eval_noise": Vector3(0.14, 0.03, 0.01), # how far off his judgement of a look or a pass can be
-	"overlook": Vector3(0.3, 0.04, 0.01),    # each teammate: the chance he doesn't see him as an option this look
-	"center_use": Vector3(0.4, 1.0, 1.5),    # how much he values getting it into the man at 2 m
-	"aim_smart": Vector3(0.45, 0.75, 0.92),  # the shooter goes for the side the keeper isn't on (else a predictable spot)
-	"hold": Vector3(1.25, 1.0, 0.85),        # how long the man on the ball looks before he throws (hesitation)
-	"press_react": Vector3(-0.08, 0.0, 0.08),# s sooner he reacts to the press getting to him
+	"eval_noise": Vector3(0.03, 0.006, 0.0),  # how far off his judgement of a look or a pass can be
+	"overlook": Vector3(0.04, 0.005, 0.0),    # each teammate: the chance he doesn't see him as an option this look
+	"center_use": Vector3(1.0, 1.65, 2.0),    # how much he values getting it into the man at 2 m
+	"aim_smart": Vector3(0.75, 0.96, 1.0),    # the shooter goes for the side the keeper isn't on (else a predictable spot)
+	"exploit_see": Vector3(0.575, 0.8, 0.92), # the chance he sees a gap the defence has left (OffenseAI)
+	"hold": Vector3(1.0, 0.78, 0.62),         # how long the man on the ball looks before he throws (hesitation)
+	"press_react": Vector3(0.0, 0.10, 0.18),  # s sooner he reacts to the press getting to him
 	# keepers (KeeperAI)
-	"gk_read": Vector3(0.15, 0.55, 0.85),    # how well his anticipation reads the shot he can see (0 naive .. 1 sharp)
-	"gk_temp": Vector3(1.5, 1.0, 0.75),      # how loosely he picks among his weights (higher: more random)
-	"gk_memory": Vector3(0.0, 0.35, 0.7),    # how much he leans on where this team has been putting them
-	"gk_pos_err": Vector3(0.35, 0.12, 0.03), # m off where he means to set before the shot
+	"gk_read": Vector3(0.55, 0.93, 0.97),     # how well his anticipation reads the shot he can see (0 naive .. 1 sharp)
+	"gk_temp": Vector3(1.0, 0.62, 0.42),      # how loosely he picks among his weights (higher: more random)
+	"gk_memory": Vector3(0.35, 0.8, 1.0),     # how much he leans on where this team has been putting them
+	"gk_pos_err": Vector3(0.12, 0.015, 0.0),  # m off where he means to set before the shot
 	# the centre defender (CenterDefense)
-	"cdef_noise": Vector3(0.2, 0.08, 0.02),  # how far off his valuing of recover / press / challenge / foul can be
-	"pen_sense": Vector3(0.45, 0.8, 1.0),    # how much of what a penalty really costs he weighs
+	"cdef_noise": Vector3(0.08, 0.01, 0.0),   # how far off his valuing of recover / press / challenge / foul can be
+	"pen_sense": Vector3(0.8, 1.0, 1.0),      # how much of what a penalty really costs he weighs (1: in full; no higher)
 	# all of them
-	"mistake": Vector3(0.16, 0.03, 0.01),    # a decision: the chance of a plainly worse option
+	"mistake": Vector3(0.03, 0.005, 0.0),     # a decision: the chance of a plainly worse option
 }
 
-## The CPU's timing and pace at EASY, MEDIUM, HARD (multipliers; MEDIUM 1, the game as it was).
+## The CPU's timing and pace at EASY, MEDIUM, HARD (multipliers; EASY 1, the game as first tuned).
 const CPU := {
-	"shot_low": Vector3(0.85, 1.0, 1.10),    # its shots' speed, a soft pull (power 0.2)...
-	"shot_high": Vector3(0.90, 1.0, 1.25),   # ...and a full one (power 1), smoothly between
-	"gk_react": Vector3(1.30, 1.0, 0.75),    # its keeper's reaction and recognition delays (and his read of a hold)
-	"arm_delay": Vector3(1.35, 1.0, 0.75),   # its pressing defenders' delay before the arm starts up
+	"shot_low": Vector3(1.0, 1.12, 1.2),      # its shots' speed, a soft pull (power 0.2)...
+	"shot_high": Vector3(1.0, 1.28, 1.4),     # ...and a full one (power 1), smoothly between
+	"gk_react": Vector3(1.0, 0.65, 0.5),      # its keeper's reaction and recognition delays (and his read of a hold)
+	"gk_dive": Vector3(1.0, 1.15, 1.25),      # its keeper's dive (push off and rise to full stretch): this much quicker
+	"gk_wing_early": Vector3(1.0, 0.8, 0.7),  # ...and on a wing's shot ("1", "5") early in the shot clock, his delays this much again
+	"arm_delay": Vector3(1.0, 0.65, 0.5),     # its pressing defenders' delay before the arm starts up
 }
+
+## Your catch-and-shoot bonus window against the CPU at EASY, MEDIUM, HARD: its full-bonus window
+## and its fade both this share of ShotModel's (10% / 25% / 50% smaller). Only your attack against
+## the CPU (MatchFlow sets Play.cs_k): never the CPU's shots, multiplayer or a drill.
+const CATCH_SHOOT := Vector3(0.9, 0.75, 0.5)
+
+static func catch_shoot_k(l: float) -> float:
+	l = clampf(l, 0.0, 1.0)
+	if l <= MEDIUM:
+		return lerpf(CATCH_SHOOT.x, CATCH_SHOOT.y, l / MEDIUM)
+	return lerpf(CATCH_SHOOT.y, CATCH_SHOOT.z, (l - MEDIUM) / (1.0 - MEDIUM))
 
 ## The CPU's shot-speed multiplier at level `l` for a shot pulled to `power` (0.2 .. 1).
 static func cpu_shot_speed(l: float, power: float) -> float:
@@ -95,11 +114,20 @@ static func cpu_shot_speed(l: float, power: float) -> float:
 static func cpu_keeper_react(l: float) -> float:
 	return _line(CPU.gk_react, l)
 
+## The CPU keeper's dive-speed multiplier at level `l` (KeeperDive.quick: his push off and rise).
+static func cpu_keeper_dive(l: float) -> float:
+	return _line(CPU.gk_dive, l)
+
+## The CPU keeper's extra reaction multiplier at level `l` for a wing's shot, `early` 0 (late in
+## the shot clock) .. 1 (early: Play.wing_early).
+static func cpu_keeper_wing(l: float, early: float) -> float:
+	return lerpf(1.0, _line(CPU.gk_wing_early, l), clampf(early, 0.0, 1.0))
+
 ## The CPU defenders' arm-raise-delay multiplier at level `l`.
 static func cpu_arm_delay(l: float) -> float:
 	return _line(CPU.arm_delay, l)
 
-## Measurement only (--test ai_balance N nocpu): the CPU's timing and pace as before this update.
+## Measurement only (--test ai_balance N nocpu): the CPU's timing and pace as first tuned (EASY's).
 static var cpu_neutral := false
 
 static func _line(v: Vector3, l: float) -> float:
@@ -133,7 +161,25 @@ static func mode(career := false) -> String:
 		m = Game.career.difficulty
 	return m if m in MODES else DEFAULT_MODE
 
-## Picking a mode (Settings, New Career): the device's, and the loaded career's.
+## A NEW DYNASTY starts at DYNAMIC, whatever the device's pick and whichever school: the New
+## Career screen opens on it (reset_new_career) and the player can switch there or any time
+## later in Settings (set_mode: that career's own, kept in its save). Older saves keep theirs.
+const NEW_CAREER_MODE := "dynamic"
+static var new_career_pick := NEW_CAREER_MODE
+
+static func reset_new_career() -> void:
+	new_career_pick = NEW_CAREER_MODE
+
+## The New Career screen's pick (only the career about to be made; Quick Match keeps its own).
+static func pick_new_career(m: String) -> void:
+	if m in MODES:
+		new_career_pick = m
+
+## The mode a career being made now starts at.
+static func new_career_mode() -> String:
+	return new_career_pick if new_career_pick in MODES else NEW_CAREER_MODE
+
+## Picking a mode (Settings): the device's, and the loaded career's.
 static func set_mode(m: String) -> void:
 	if not m in MODES:
 		return
@@ -253,7 +299,7 @@ static func step_for(hist: Array) -> float:
 # ------------------------------------------------------------------ the keeper duel
 ## The keeper duel's slow motion while you react to their shot. Your dive runs on screen time
 ## and the ball on game time, so this is part of the physics of your save: the same at every
-## level (the old NORMAL's), never a difficulty assist.
+## level (the original tuning's), never a difficulty assist.
 const DUEL_SLOWMO := 0.55
 
 static func duel_slowmo(_l: float = MEDIUM) -> float:

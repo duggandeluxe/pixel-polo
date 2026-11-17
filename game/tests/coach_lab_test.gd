@@ -49,6 +49,8 @@ func _texts(n: Node) -> String:
 	var out := PackedStringArray()
 	for l in n.find_children("*", "Label", true, false):
 		out.append((l as Label).text)
+	for l in n.find_children("*", "RichTextLabel", true, false):
+		out.append(String(l.get_meta("text", "")))   # (CreditCoin.rich: a line with the coin)
 	return "\n".join(out)
 
 ## A real played game's review in memory (as roll() keeps it), the postgame then closed.
@@ -78,7 +80,8 @@ func _access() -> void:
 	await _frames()
 	r.check(Game.current_name == "settings", "26: Developer Mode off: the panel can't be opened (back to Settings)")
 	Game.settings.dev_mode = true
-	Game.goto("settings")
+	DevGate.try_unlock("8008")   # (the developer tools: the DEV screen, behind its code)
+	Game.goto("dev_settings")
 	await _frames()
 	r.check(_find("CoachLab") != null and _find("RecordLab") != null and _find("ResetGame") != null, "1: Developer Mode on: COACHING EVENTS beside the other developer tools (they're all still there)")
 	_press("CoachLab")
@@ -88,7 +91,7 @@ func _access() -> void:
 	r.check(_find("EventList").get_child_count() == 12, "1: with no career loaded it still lists every event (mock data)")
 	Game.current_screen.on_back()
 	await _frames()
-	r.check(Game.current_name == "settings", "1: Back returns to Settings")
+	r.check(Game.current_name == "dev_settings", "1: Back returns to the DEV screen")
 
 # ------------------------------------------------------------------ 2-5
 func _list_and_details(c: Career) -> void:
@@ -132,8 +135,8 @@ func _list_and_details(c: Career) -> void:
 		and t.contains("FAILURE: 0.75X GAME XP") and t.contains("FAILURE: -10% HOT STAR PROGRESS") and t.contains("5 GOALS") and t.contains("SUCCESS: 3X GAME XP")
 		and t.contains("SPECIAL APPEARANCE PROBABILITY: 5%"), "3/15: A STAR IN THE MAKING: +80 XP, +20% HOT; 3 G+A for 2X, 0.75X and -10% HOT; special 5 GOALS for 3X, 5%")
 	var expect := {"backup_breakout": ["+40 XP", "SUCCESS: +150 XP"], "rough_night": ["+60 XP", "DOUBLE COLD RECOVERY", "SUCCESS: +160 XP"],
-		"recruiting_ripple": ["+20 CREDITS NOW", "-15 CREDITS NOW", "WIN NEXT GAME: +50 CREDITS"], "practice_discipline": ["-15 CREDITS NOW", "+40 XP", "MISSES THE NEXT GAME"],
-		"cost_of_victory": ["-15 CREDITS NOW", "+30 XP EACH", "SUCCESS: +120 XP"]}
+		"recruiting_ripple": ["+20{coin} NOW", "-15{coin} NOW", "WIN NEXT GAME: +50{coin}"], "practice_discipline": ["-15{coin} NOW", "+40 XP", "MISSES THE NEXT GAME"],
+		"cost_of_victory": ["-15{coin} NOW", "+30 XP EACH", "SUCCESS: +120 XP"]}
 	var wrong: Array = []
 	for id in expect:
 		L.pick_pid = fp.id

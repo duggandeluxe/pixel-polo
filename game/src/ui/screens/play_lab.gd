@@ -16,7 +16,7 @@ var play: Play = null
 var view := PoolView.new()
 var bar_show := BarHit.new()
 var goal_show := GoalShow.new()
-var goal_fx := GoalFx.new()       # the Goal Celebrations level (none but Level 1 unless a lab asks)
+var goal_fx := GoalFx.new()       # the goal celebration (CLASSIC unless a lab asks)
 var banner := EventBanner.new()
 var scratch := MatchState.new()   # (GoalShow reads the score off it; nothing's ever added)
 var aim := AimGuide.new()
@@ -41,7 +41,7 @@ func lab_ready(title: String) -> void:
 
 func on_back() -> void:
 	Sfx.play("back")
-	Game.back("settings")
+	Game.back("dev_settings")
 
 ## Your attack, a fresh possession: `kind` (a counter, the half court), the same every time.
 func new_play(kind: int = Play.Kind.HALF_COURT, seed_v: int = 7) -> Play:
@@ -232,6 +232,7 @@ func _trim(s: Swimmer) -> Color:
 func _draw_stage(ci: Control) -> void:
 	var size := ci.size
 	PoolArt.draw_pool(ci, view, t, size, lab_excite(), null, lab_crowd(), _net(), lab_style())
+	goal_fx.draw_world(ci, view)
 	if play != null:
 		var bodies: Array[Swimmer] = play.bodies().duplicate()
 		bodies.sort_custom(func(a: Swimmer, b: Swimmer): return a.pos.y < b.pos.y)
@@ -255,7 +256,7 @@ func _draw_stage(ci: Control) -> void:
 	goal_fx.draw(ci, size, view)
 	banner.draw(ci, size)
 	bar_show.draw(ci, size, view)
-	goal_show.draw(ci, size, view)
+	goal_show.draw(ci, size)
 	# the status line, along the bottom (clear of the pool's top edge, where the wings play)
 	ci.draw_rect(Rect2(0, size.y - 12, size.x, 12), Color(UI.INK, 0.75))
 	UI.text(ci, Vector2(4, size.y - 3), status, 8, UI.TEXT, "body")
@@ -264,9 +265,10 @@ func _draw_stage(ci: Control) -> void:
 func lab_goal(_who: PoloPlayer) -> void:
 	pass
 
-## VISUAL UPGRADE TESTING's levels: the goal, the stands, how full and how excited they are.
+## VISUAL UPGRADE TESTING's levels: the goal celebration (VisualUpgrades.CLASSIC .. FIREWORKS), the
+## stands, how full and how excited they are.
 func lab_goal_level() -> int:
-	return 1
+	return VisualUpgrades.CLASSIC
 
 func lab_style() -> Dictionary:
 	return {}

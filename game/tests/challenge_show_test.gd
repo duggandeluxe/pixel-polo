@@ -124,8 +124,8 @@ func _accuracy() -> void:
 		"14-16: GOAL 3 GOALS + ASSISTS, 4 / 3 G+A (2 goals + 2 assists), the bar full, not past it")
 	var cq := ChallengeShow.consequence(res)
 	var ap: Dictionary = res.applied
-	r.check(cq[0] == "REWARD EARNED" and cq[1] == "2X GAME XP" and String(ap.kind) == "mult" and int(ap.xp) == roundi(int(ap.base) * 2.0) and String(cq[2]) == "%d -> %d XP" % [int(ap.base), int(ap.xp)],
-		"18: REWARD EARNED: 2X GAME XP, as applied (%s)" % cq[2])
+	r.check(cq[0] == "REWARD EARNED" and cq[1] == "2X GAME XP" and String(ap.kind) == "mult" and int(ap.xp) == roundi(int(ap.base) * 2.0) and String(cq[2]) == "%d -> %d XP   +%d%% HOT STAR PROGRESS FOR %s" % [int(ap.base), int(ap.xp), CoachEvents._pp(CoachEvents.HOT.loss), p.short_name().to_upper()],
+		"18: REWARD EARNED: 2X GAME XP, as applied, and the HOT STAR PROGRESS it won (%s)" % cq[2])
 	# a keeper's missed saves: the 0.5X
 	c = _fresh(812)
 	var k: PoloPlayer = c.team().starters()[0]
@@ -254,9 +254,9 @@ func _screen() -> void:
 	r.check(CoachEvents.popups(c).size() == 2, "28: two challenges, two results")
 	# the real postgame order: the review, then the results
 	Game.career = c
-	Game.goto("postgame_review")
+	Game.goto("player_development")
 	await _frames()
-	r.check(Game.current_name == "postgame_review", "29: the POSTGAME REVIEW as ever")
+	r.check(Game.current_name == "player_development", "29: PLAYER DEVELOPMENT, the postgame's last screen")
 	Game.current_screen._continue()
 	await _frames()
 	var shows := Game.current_screen.find_children("*", "ChallengeShow", true, false)

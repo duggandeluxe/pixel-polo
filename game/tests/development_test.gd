@@ -392,7 +392,10 @@ func _no_bandage() -> void:
 		for f in DirAccess.get_files_at(dir):
 			if f.ends_with(".gd"):
 				var src := FileAccess.get_file_as_string(dir.path_join(f))
-				if src.contains("xp_level") or src.to_upper().contains("LEVEL UP") or src.contains("HIDDEN LEVEL"):
+				# (POSTGAME PLAYER DEVELOPMENT says LEVEL UP! for each token a game paid, as asked
+				# for; it never reads the level itself: only the token counts either side of it)
+				var says_level := src.to_upper().contains("LEVEL UP") and f != "player_development.gd"
+				if src.contains("xp_level") or says_level or src.contains("HIDDEN LEVEL"):
 					leaks.append(f)
 	r.check(leaks.is_empty(), "5: no screen reads or shows the hidden level (%s)" % [leaks])
 	var tree: SceneTree = r.get_tree()
@@ -405,10 +408,9 @@ func _no_bandage() -> void:
 	await tree.process_frame
 	var line: Control = Game.current_screen.find_child("XpLine", true, false)
 	var txt := String(line.get_meta("text")) if line else ""
-	r.check(txt == "XP: 85 / %d  UPGRADES AVAILABLE: 1" % Development.xp_needed(p), "6: the profile shows XP and upgrades available (%s)" % txt)
-	r.check(not txt.contains("LV") and not txt.contains("LEVEL"), "5: ...never a level")
-	var note: Control = Game.current_screen.find_child("UpgradeNote", true, false)
-	r.check(note != null and String(note.get_meta("text")) == "NEW ATTRIBUTE UPGRADE AVAILABLE!", "6: NEW ATTRIBUTE UPGRADE AVAILABLE! while he has a token")
+	r.check(txt == "XP TO NEXT LEVEL: %d  UPGRADES AVAILABLE: 1" % (Development.xp_needed(p) - 85), "6: the profile shows XP to go and upgrades available (%s)" % txt)
+	r.check(not txt.contains("LV") and not txt.contains("LEVEL %d" % p.xp_level), "5: ...never his level number")
+	r.check(Game.current_screen.find_child("UpgradeNote", true, false) == null, "6: no NEW ATTRIBUTE UPGRADE AVAILABLE! line (UPGRADES AVAILABLE flashes instead)")
 	Game.goto("title")
 	await tree.process_frame
 

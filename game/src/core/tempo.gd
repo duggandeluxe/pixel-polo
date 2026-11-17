@@ -16,9 +16,12 @@ class_name Tempo
 const SHOT_PIVOT := 65.0
 const SHOT_AT_PIVOT := 1.036
 const SHOT_SLOPE := 0.4
-## The fastest any shot leaves the hand (m/s), before the centre's power shot: a rocket, never a
-## blur no keeper can see.
+## The soft cap on a shot's pace (m/s), before the centre's power shot: up to here a shot keeps
+## every bit of its pace; past it only SHOT_SOFT of the excess counts (soft_shot), so a shooter
+## past a 10 (a DEV Recruit, a Hot Star) still shoots harder, but a rocket, never a blur no
+## keeper can see.
 const SHOT_MAX := 20.0
+const SHOT_SOFT := 0.5
 ## Passes: the passer's rating either side of PASS_MID moves its pace by up to PASS_SKILL.
 const PASS_MID := 65.0
 const PASS_SKILL := 0.06
@@ -38,9 +41,14 @@ static func curve(pts: Array, x: float) -> float:
 			return lerpf(a.y, b.y, (x - a.x) / (b.x - a.x))
 	return pts[pts.size() - 1].y
 
-## The shooter's share of a shot's pace, for his shooting `skill` (0-100, form and all).
-static func shooter_shot(skill: float) -> float:
-	return SHOT_AT_PIVOT + (clampf(skill, 0.0, 100.0) - SHOT_PIVOT) / 100.0 * SHOT_SLOPE
+## The shooter's share of a shot's pace, for his shooting `skill` (0-100, form and all), read up to
+## `top` (100; a DEV Recruit's Attributes.rating_top).
+static func shooter_shot(skill: float, top: float = 100.0) -> float:
+	return SHOT_AT_PIVOT + (clampf(skill, 0.0, top) - SHOT_PIVOT) / 100.0 * SHOT_SLOPE
+
+## A shot's raw pace (m/s) through the soft cap: unchanged up to SHOT_MAX, SHOT_SOFT of the rest past it.
+static func soft_shot(speed: float) -> float:
+	return speed if speed <= SHOT_MAX else SHOT_MAX + (speed - SHOT_MAX) * SHOT_SOFT
 
 ## A pass's pace as a share of Play.PASS_SPEED, from the passer's `passing`.
 static func pass_mult(passing: float) -> float:

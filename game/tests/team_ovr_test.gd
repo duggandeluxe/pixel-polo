@@ -263,7 +263,7 @@ func _target_unused() -> void:
 		var src := FileAccess.get_file_as_string(f)
 		for needle in ["s.ovr", "sd.ovr", "\"ovr\"", ".ovr)"]:
 			# (the school table itself; the Road to Glory orders its tiers by it, never a team's strength)
-			if src.contains(needle) and not f.ends_with("career.gd") and not f.ends_with("colleges.gd") and not f.ends_with("progression.gd") and not f.ends_with("college_gen.gd") and not f.ends_with("division_lab.gd") and not f.ends_with("division_checks.gd"):   # (the expansion's first rosters, and Developer Mode showing their targets)
+			if src.contains(needle) and not f.ends_with("career.gd") and not f.ends_with("colleges.gd") and not f.ends_with("progression.gd") and not f.ends_with("college_gen.gd"):
 				ovr_readers.append("%s (%s)" % [f.get_file(), needle])
 	var career_src := FileAccess.get_file_as_string("res://src/core/career.gd")
 	r.check(ovr_readers.is_empty() and career_src.count("s.ovr") == 2 and career_src.contains("make_initial_roster(t, c.rng, c.new_id, float(s.ovr)") and career_src.contains("add_initial_bench(t, c.rng, c.new_id, float(s.ovr)"),

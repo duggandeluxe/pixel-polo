@@ -34,7 +34,6 @@ const GOLD_R := [Color("6e4a06"), Color("b07d10"), Color("e2ac22"), Color("ffd84
 const SILVER_R := [Color("454c5a"), Color("7f8899"), Color("b4bdcb"), Color("dde3ec"), Color("ffffff")]
 const IRON_R := [Color("1c1f27"), Color("363b47"), Color("555c6a"), Color("7f8797"), Color("aab2c0")]
 const CRYSTAL_R := [Color("1d4fb8"), Color("3a86e8"), Color("74c4f7"), Color("bfe8ff"), Color("ffffff")]
-const BRONZE_R := [Color("4a2408"), Color("8a4c16"), Color("c47a2c"), Color("eaa95a"), Color("ffe0b0")]
 const WOOD_R := [Color("2a1408"), Color("4a2612"), Color("6b3a1e"), Color("8f5530"), Color("b47447")]
 const OUT := Color("0a0f24")
 
@@ -67,7 +66,7 @@ static func cat_of(e: Dictionary) -> String:
 	return "poy"
 
 static func _paint(img: Image, cat: String, ncsa: bool) -> void:
-	_plinth(img, (ncsa and cat in ["pot", "opot", "dpot"]) or cat in ["ncsa_champ", "d3_champ"])
+	_plinth(img, (ncsa and cat in ["pot", "opot", "dpot"]) or cat == "ncsa_champ")
 	match cat:
 		"poy":
 			_foot(img, 34, 12, GOLD_R)
@@ -99,12 +98,6 @@ static func _paint(img: Image, cat: String, ncsa: bool) -> void:
 			_champ_cup(img, SILVER_R, false)
 		"ncsa_champ":
 			_champ_cup(img, GOLD_R, true)
-		"d2_champ":   # (the Division II Championship: crystal, II on the bowl)
-			_champ_cup(img, CRYSTAL_R, false)
-			_numeral(img, 2)
-		"d3_champ":   # (the NCSA Division III Championship: bronze on the grand plinth, III on the bowl)
-			_champ_cup(img, BRONZE_R, false)
-			_numeral(img, 3)
 		"celebration":   # (an ordinary win's cup: no honour, never in the Trophy Room)
 			_cup(img, 9, 13, 20, GOLD_R)
 		"opot":
@@ -278,14 +271,6 @@ static func _cup(img: Image, top: int, bowl: int, w: int, r: Array) -> void:
 ## A CHAMPIONSHIP CUP (the team trophy case): a deep lidded cup on a tall footed stem, wide ear
 ## handles, a ball on the lid; the NCSA's gold and grander (a laurel band round the bowl, a star
 ## on its plate), a conference's silver.
-## `n` gold bars on a championship cup's bowl: its division's Roman numeral.
-static func _numeral(img: Image, n: int) -> void:
-	for i in n:
-		var x := 20 - n * 2 + i * 4 + 1
-		for y in range(15, 21):
-			_px(img, x, y, GOLD_R[3])
-			_px(img, x + 1, y, GOLD_R[1])
-
 static func _champ_cup(img: Image, r: Array, grand: bool) -> void:
 	_cyl(img, 19, 25, 2, 7, r)                                     # the stem
 	_cyl(img, 17, 23, 6, 2, r)                                     # its collar

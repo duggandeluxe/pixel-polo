@@ -13,7 +13,7 @@ extends Control
 ##            condition ticked or crossed
 ##   bottom   REWARD EARNED / PENALTY APPLIED / SPECIAL CHALLENGE COMPLETE!: exactly what was
 ##            applied (the result's `applied`: fixed XP, the multiplier he got, or none), and a
-##            HOT STAR loss when there was one
+##            HOT STAR gain or loss when there was one
 ##   CONTINUE (usable at once: a tap anywhere else finishes the animation)
 ## It only REPORTS: everything comes from the settled result (Career.coach_results), written once
 ## by CoachEvents.award_game from his real line. Nothing here grants, takes or decides anything.
@@ -177,7 +177,7 @@ static func consequence(r: Dictionary) -> Array:
 	if look(r) == "fail" and String(ap.get("kind", "none")) == "none":
 		head = "NO BONUS"
 	for ln in r.get("lines", []):
-		if String(ln[0]).contains("HOT STAR PROGRESS") and String(ln[1]) == "bad":
+		if String(ln[0]).contains("HOT STAR PROGRESS") and String(ln[1]) in ["bad", "good"]:
 			small = (small + "   " if small != "" else "") + String(ln[0]).to_upper()
 	return [head, big, small]
 
